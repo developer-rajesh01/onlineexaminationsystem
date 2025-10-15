@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import image from "../assets/login.jpg"; // Keep your path as is
+import image from "../assets/login.jpg"; // Make sure image path is correct
 
 function LoginPage() {
     const navigate = useNavigate();
@@ -10,13 +10,23 @@ function LoginPage() {
     const handleSubmit = (e) => {
         e.preventDefault();
 
-        // Simulated auth logic — replace with your actual login API & response
+        // Simulated authentication logic
         const fakeAuth = {
             role: email === "faculty@example.com" ? "faculty" : "student",
         };
 
-        // Save user role in localStorage for layout and redirect logic
-     
+        // Save user role and email in localStorage
+        localStorage.setItem("userRole", fakeAuth.role);
+        localStorage.setItem("userEmail", email);
+
+        // Redirect based on role
+        if (fakeAuth.role === "faculty") {
+            navigate("/faculty/dashboard");
+        } else if (fakeAuth.role === "student") {
+            navigate("/student/dashboard");
+        } else {
+            navigate("/login"); // fallback
+        }
     };
 
     return (
