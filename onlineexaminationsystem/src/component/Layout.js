@@ -1,30 +1,36 @@
 import React, { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useNavigate, useLocation, Outlet } from "react-router-dom";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import FacultyDashboard from "../pages/faculty/Dashboard";
-import Questions from "../pages/faculty/questions";
-import Scoreboard from "../pages/faculty/scoreboard";
-
 
 import {
     HiOutlineViewGrid,
     HiOutlineQuestionMarkCircle,
     HiOutlineClipboardList,
     HiOutlineUserCircle,
-  } from "react-icons/hi";
+    HiLogout,
+    HiOutlineHome,
+    HiOutlineLogout,
+    HiOutlineChartBar
+} from "react-icons/hi";
 
-
+// Faculty Sidebar component
 function FacultySidebar() {
+    const navigate = useNavigate();
+
+    const handleLogout = () => {
+        // Clear stored user data during logout
+        localStorage.removeItem("userRole");
+        localStorage.removeItem("userEmail");
+        // Redirect to login page
+        navigate("/login", { replace: true });
+    };
     return (
-        <aside className="w-58 bg-indigo-200 p-4 min-h-screen flex flex-col">
-            {/* Faculty Name and Divider */}
+        <aside className="w-56 bg-indigo-200 p-4 min-h-screen flex flex-col">
             <div>
                 <h2 className="font-bold text-lg mb-2 text-indigo-900">xcv</h2>
                 <hr className="border-indigo-300 mb-4" />
             </div>
-            {/* Menu */}
             <nav>
                 <ul className="flex flex-col gap-1">
                     <li>
@@ -56,14 +62,7 @@ function FacultySidebar() {
                     </li>
                 </ul>
             </nav>
-            {/* Spacer pushes Profile link down */}
-            <Routes>
-                <Route path="/dashboard" element={<FacultyDashboard />}>
-                    <Route path="questions" element={<Questions />} />
-                    <Route path="scoreboard" element={<Scoreboard />} />
-                </Route>
-            </Routes>
-            {/* Profile link at the bottom */}
+            <div className="flex-1"></div>
             <Link
                 to="/profile"
                 className="flex items-center text-indigo-700 hover:bg-indigo-400 rounded-lg px-4 py-2 transition"
@@ -71,21 +70,79 @@ function FacultySidebar() {
                 <HiOutlineUserCircle size={32} className="mr-3" />
                 Profile
             </Link>
+            <button
+                onClick={handleLogout}
+                className="flex items-center text-indigo-700 hover:bg-indigo-400 rounded-lg px-4 py-2 transition"
+            >
+                <HiLogout size={32} className="mr-3" />
+                Logout
+            </button>
         </aside>
-
-
     );
 }
 
 function StudentHeader() {
+    const navigate = useNavigate();
+
+    const handleLogout = () => {
+        // Clear stored user data during logout
+        localStorage.removeItem("userRole");
+        localStorage.removeItem("userEmail");
+        // Redirect to login page
+        navigate("/login", { replace: true });
+    };
     return (
-        <header className="bg-white shadow p-4 flex justify-between items-center">
-            <div className="font-bold text-xl">YourLogo</div>
+        <header className="bg-indigo-600 shadow-md p-4 flex justify-between items-center text-white">
+            {/* Logo */}
+            <div className="flex items-center space-x-2">
+                <div className="font-bold text-2xl">YourLogo</div>
+            </div>
+
+            {/* Menu Items */}
             <nav>
-                <ul className="flex gap-6">
-                    <li><Link to="/profile" className="hover:text-indigo-700">Profile</Link></li>
-                    <li><Link to="/dashboard" className="hover:text-indigo-700">Dashboard</Link></li>
-                    {/* Add other student menu items */}
+                <ul className="flex gap-8 items-center">
+                  
+                    {/* Dashboard */}
+                    <li>
+                        <Link
+                            to="/student/dashboard"
+                            className="flex items-center hover:text-indigo-200 transition duration-200"
+                        >
+                            <HiOutlineHome className="mr-1" size={20} />
+                            Dashboard
+                        </Link>
+                    </li>
+                    {/* Scoreboard - If needed */}
+                    <li>
+                        <Link
+                            to="/student/scoreboard"
+                            className="flex items-center hover:text-indigo-200 transition duration-200"
+                        >
+                            <HiOutlineChartBar className="mr-1" size={20} />
+                            Scoreboard
+                        </Link>
+                    </li>
+                    {/* Profile */}
+                    <li>
+                        <Link
+                            to="/student/profile"
+                            className="flex items-center hover:text-indigo-200 transition duration-200"
+                        >
+                            <HiOutlineUserCircle className="mr-1" size={20} />
+                            Profile
+                        </Link>
+                    </li>
+                    {/* Logout */}
+
+                    <li>
+                        <button
+                            onClick={handleLogout}
+                            className="flex items-center hover:text-red-400 transition duration-200"
+                        >
+                            <HiOutlineLogout className="mr-1" size={20} />
+                            Logout
+                        </button>
+                    </li>
                 </ul>
             </nav>
         </header>
@@ -101,7 +158,7 @@ function AuthHeader() {
     );
 }
 
-function Layout({ children }) {
+function Layout() {
     const [role, setRole] = useState("");
     const location = useLocation();
 
@@ -116,7 +173,9 @@ function Layout({ children }) {
         return (
             <>
                 <AuthHeader />
-                <main className="p-10">{children}</main>
+                <main className="p-10">
+                    <Outlet />
+                </main>
                 <Footer />
             </>
         );
@@ -126,7 +185,9 @@ function Layout({ children }) {
         return (
             <div className="flex min-h-screen">
                 <FacultySidebar />
-                <main className="flex-1 p-10 bg-white overflow-auto">{children}</main>
+                <main className="flex-1 p-10 bg-white overflow-auto">
+                    <Outlet />
+                </main>
             </div>
         );
     }
@@ -135,8 +196,10 @@ function Layout({ children }) {
         return (
             <>
                 <StudentHeader />
-                <main className="p-10">{children}</main>
-                <Footer />
+                <main className="p-10">
+                    <Outlet />
+                </main>
+                
             </>
         );
     }
@@ -148,7 +211,9 @@ function Layout({ children }) {
                 <div className="font-bold text-xl">YourLogo</div>
                 <Navbar />
             </header>
-            <main className="p-10">{children}</main>
+            <main className="p-10">
+                <Outlet />
+            </main>
             <Footer />
         </>
     );

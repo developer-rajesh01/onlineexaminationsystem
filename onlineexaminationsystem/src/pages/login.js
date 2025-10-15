@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect,useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import image from "../assets/login.jpg"; // Make sure image path is correct
 
@@ -6,6 +6,7 @@ function LoginPage() {
     const navigate = useNavigate();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+
 
     const handleSubmit = (e) => {
         e.preventDefault();
@@ -21,13 +22,17 @@ function LoginPage() {
 
         // Redirect based on role
         if (fakeAuth.role === "faculty") {
-            navigate("/faculty/dashboard");
+            navigate("/dashboard", { replace: true });
         } else if (fakeAuth.role === "student") {
-            navigate("/student/dashboard");
+            navigate("/student/dashboard", { replace: true });
         } else {
-            navigate("/login"); // fallback
+            navigate("/login", { replace: true }); // fallback
         }
     };
+    useEffect(() => {
+        // Replace current history entry so Back doesn't go anywhere previous
+        window.history.replaceState(null, "", window.location.href);
+    }, []);
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-100 via-indigo-50 to-white px-4">
