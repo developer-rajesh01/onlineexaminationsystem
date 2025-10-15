@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Link, useNavigate, useLocation, Outlet } from "react-router-dom";
+import { Link, NavLink, useNavigate, useLocation, Outlet } from "react-router-dom";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
 
@@ -20,63 +20,101 @@ function FacultySidebar() {
 
     const handleLogout = () => {
         // Clear stored user data during logout
-        localStorage.removeItem("userRole");
-        localStorage.removeItem("userEmail");
+        localStorage.removeItem("role");
+        localStorage.removeItem("email");
+        localStorage.removeItem("name");
+
         // Redirect to login page
         navigate("/login", { replace: true });
     };
     return (
-        <aside className="w-56 bg-indigo-200 p-4 min-h-screen flex flex-col">
+        <aside className="w-76 bg-indigo-900 p-2 min-h-screen flex flex-col">
             <div>
-                <h2 className="font-bold text-lg mb-2 text-indigo-900">xcv</h2>
-                <hr className="border-indigo-300 mb-4" />
+                <h2 className="font-bold text-xl mb-2 text-gray-100">XCV</h2>
+                <hr className="border-blue-300 mb-4" />
             </div>
-            <nav>
-                <ul className="flex flex-col gap-1">
+            <nav className="flex-1">
+                <ul className="flex flex-col gap-2">
                     <li>
-                        <Link
+                        <NavLink
                             to="/dashboard"
-                            className="flex items-center text-indigo-700 hover:bg-indigo-400 rounded-lg px-2 py-2 transition"
+                            className={({ isActive }) =>
+                                `flex items-center rounded-lg px-3 py-2 transition-all duration-200 group ${isActive
+                                    ? "bg-teal-400 text-white shadow-md"
+                                    : "text-gray-100 hover:bg-blue-400 hover:text-white hover:shadow-lg transform hover:scale-105"
+                                }`
+                            }
                         >
-                            <HiOutlineViewGrid size={20} className="mr-2" />
+                            <HiOutlineViewGrid
+                                size={20}
+                                className="mr-3 group-hover:scale-110 transition-transform"
+                            />
                             <span className="text-base">Dashboard</span>
-                        </Link>
+                        </NavLink>
                     </li>
                     <li>
-                        <Link
+                        <NavLink
                             to="/questions"
-                            className="flex items-center text-indigo-700 hover:bg-indigo-400 rounded-lg px-2 py-2 transition"
+                            className={({ isActive }) =>
+                                `flex items-center rounded-lg px-3 py-2 transition-all duration-200 group ${isActive
+                                    ? "bg-teal-400 text-white shadow-md"
+                                    : "text-gray-100 hover:bg-blue-400 hover:text-white hover:shadow-lg transform hover:scale-105"
+                                }`
+                            }
                         >
-                            <HiOutlineQuestionMarkCircle size={20} className="mr-2" />
+                            <HiOutlineQuestionMarkCircle
+                                size={20}
+                                className="mr-3 group-hover:scale-110 transition-transform"
+                            />
                             <span className="text-base">Questions</span>
-                        </Link>
+                        </NavLink>
                     </li>
                     <li>
-                        <Link
+                        <NavLink
                             to="/scoreboard"
-                            className="flex items-center text-indigo-700 hover:bg-indigo-400 rounded-lg px-2 py-2 transition"
+                            className={({ isActive }) =>
+                                `flex items-center rounded-lg px-3 py-2 transition-all duration-200 group ${isActive
+                                    ? "bg-teal-400 text-white shadow-md"
+                                    : "text-gray-100 hover:bg-blue-400 hover:text-white hover:shadow-lg transform hover:scale-105"
+                                }`
+                            }
                         >
-                            <HiOutlineClipboardList size={20} className="mr-2" />
+                            <HiOutlineClipboardList
+                                size={20}
+                                className="mr-3 group-hover:scale-110 transition-transform"
+                            />
                             <span className="text-base">Scoreboard</span>
-                        </Link>
+                        </NavLink>
                     </li>
                 </ul>
             </nav>
-            <div className="flex-1"></div>
-            <Link
-                to="/profile"
-                className="flex items-center text-indigo-700 hover:bg-indigo-400 rounded-lg px-4 py-2 transition"
-            >
-                <HiOutlineUserCircle size={32} className="mr-3" />
-                Profile
-            </Link>
-            <button
-                onClick={handleLogout}
-                className="flex items-center text-indigo-700 hover:bg-indigo-400 rounded-lg px-4 py-2 transition"
-            >
-                <HiLogout size={32} className="mr-3" />
-                Logout
-            </button>
+            <div className="mt-auto">
+                <NavLink
+                    to="/profile"
+                    className={({ isActive }) =>
+                        `flex items-center rounded-lg px-4 py-2 transition-all duration-200 group ${isActive
+                            ? "bg-teal-400 text-white shadow-md"
+                            : "text-gray-100 hover:bg-blue-400 hover:text-white hover:shadow-lg transform hover:scale-105"
+                        }`
+                    }
+                >
+                    <HiOutlineUserCircle
+                        size={30}
+                        className="mr-3 group-hover:scale-110 transition-transform"
+                    />
+                    <span className="text-base">Profile</span>
+                </NavLink>
+                <button
+                    onClick={handleLogout}
+                    className="flex items-center w-full text-red-400 hover:bg-red-500 hover:text-white rounded-lg px-4 py-2 transition-all duration-200 mt-2 group hover:shadow-lg transform hover:scale-105"
+                >
+                    <HiLogout
+                        size={30}
+                        className="mr-3 group-hover:scale-110 transition-transform"
+                    />
+                    <span className="text-base">Logout</span>
+                </button>
+            </div>
         </aside>
     );
 }
@@ -86,8 +124,10 @@ function StudentHeader() {
 
     const handleLogout = () => {
         // Clear stored user data during logout
-        localStorage.removeItem("userRole");
-        localStorage.removeItem("userEmail");
+        localStorage.removeItem("role");
+        localStorage.removeItem("email");
+        localStorage.removeItem("name");
+
         // Redirect to login page
         navigate("/login", { replace: true });
     };
@@ -163,7 +203,7 @@ function Layout() {
     const location = useLocation();
 
     useEffect(() => {
-        const userRole = localStorage.getItem("userRole");
+        const userRole = localStorage.getItem("role");
         setRole(userRole || "");
     }, [location.pathname]);
 
@@ -181,11 +221,16 @@ function Layout() {
         );
     }
 
+
     if (role === "faculty") {
         return (
-            <div className="flex min-h-screen">
-                <FacultySidebar />
-                <main className="flex-1 p-10 bg-white overflow-auto">
+            <div className="flex h-screen overflow-hidden">
+                {/* Sidebar with independent scrolling */}
+                <aside className="w-56 bg-indigo-900 p-4 overflow-y-auto min-h-full">
+                    <FacultySidebar />
+                </aside>
+                {/* Main content with independent scrolling */}
+                <main className="flex-1 p-10 bg-white overflow-y-auto min-h-full">
                     <Outlet />
                 </main>
             </div>
