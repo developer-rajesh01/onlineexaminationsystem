@@ -10,9 +10,16 @@
     "axios": "^1.12.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-icons": "^5.5.0",
     "react-router-dom": "^7.9.4",
+<<<<<<< HEAD
     "react-scripts": "^5.0.1",
     "web-vitals": "^2.1.4"
+=======
+    "react-scripts": "5.0.1",
+    "web-vitals": "^2.1.4",
+    "xlsx": "^0.18.5"
+>>>>>>> ae045380ffec25ede23368061158e30ed56c1943
   },
   "scripts": {
     "start": "react-scripts start",
