@@ -28,6 +28,7 @@ function App() {
           <Route path="/register" element={<RegisterPage />} />
 
           {/* Faculty routes protected */}
+          
           <Route path="/">
             <Route
               path="dashboard"
