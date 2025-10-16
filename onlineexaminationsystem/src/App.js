@@ -12,6 +12,7 @@ import FacultyDashboard from "./pages/faculty/Dashboard";
 import Questions from "./pages/faculty/questions";
 import Scoreboard from "./pages/faculty/scoreboard";
 import Profile from './pages/faculty/Profile';
+import CreateTest from "./pages/faculty/createTest";
 
 import StudentDashboard from "./pages/student/Dashboard";
 import StudentProfile from "./pages/student/Profile";
@@ -57,6 +58,14 @@ function App() {
               element={
                 <ProtectedRoute roleRequired="faculty">
                   <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="createTest"
+              element={
+                <ProtectedRoute roleRequired="faculty">
+                  <CreateTest />
                 </ProtectedRoute>
               }
             />

@@ -17,6 +17,7 @@ import {
 // Faculty Sidebar component
 function FacultySidebar() {
     const navigate = useNavigate();
+    const userName = localStorage.getItem("name") || "Guest";
 
     const handleLogout = () => {
         // Clear stored user data during logout
@@ -30,7 +31,7 @@ function FacultySidebar() {
     return (
         <aside className="w-76 bg-indigo-900 p-2 min-h-screen flex flex-col">
             <div>
-                <h2 className="font-bold text-xl mb-2 text-gray-100">XCV</h2>
+                <h2 className="font-bold text-xl mb-2 text-gray-100">{userName}</h2>
                 <hr className="border-blue-300 mb-4" />
             </div>
             <nav className="flex-1">
@@ -54,6 +55,23 @@ function FacultySidebar() {
                     </li>
                     <li>
                         <NavLink
+                            to="/createTest"
+                            className={({ isActive }) =>
+                                `flex items-center px-3 py-2 rounded-md transition-all duration-200 group ${isActive
+                                    ? "bg-teal-500 text-white shadow-md"
+                                    : "text-gray-300 hover:bg-blue-500 hover:text-white hover:shadow-lg transform hover:scale-105"
+                                }`
+                            }
+                        >
+                            <HiOutlineClipboardList
+                                size={20}
+                                className="mr-3 group-hover:scale-125 transition-transform"
+                            />
+                            <span className="text-base">Create Test</span>
+                        </NavLink>
+                    </li>
+                    <li> 
+                        <NavLink
                             to="/questions"
                             className={({ isActive }) =>
                                 `flex items-center rounded-lg px-3 py-2 transition-all duration-200 group ${isActive
@@ -69,6 +87,7 @@ function FacultySidebar() {
                             <span className="text-base">Questions</span>
                         </NavLink>
                     </li>
+                  
                     <li>
                         <NavLink
                             to="/scoreboard"

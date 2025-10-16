@@ -2,7 +2,7 @@ import React from "react";
 import { Navigate } from "react-router-dom";
 
 function HomeRedirect() {
-    const userRole = localStorage.getItem("userRole");
+    const userRole = localStorage.getItem("role");
 
     if (userRole === "faculty") {
         return <Navigate to="/dashboard" replace />;
