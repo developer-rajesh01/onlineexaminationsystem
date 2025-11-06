@@ -42,7 +42,7 @@ function App() {
               path="questions"
               element={
                 <ProtectedRoute roleRequired="faculty">
-                  <Questions />
+                  <Questions/>
                 </ProtectedRoute>
               }
             />

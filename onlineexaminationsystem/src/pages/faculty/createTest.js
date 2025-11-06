@@ -190,34 +190,50 @@ function CreateTest() {
         localStorage.removeItem("quizData");
         localStorage.removeItem("questionsData");
     };
-
     const handleImport = (e) => {
         const file = e.target.files[0];
         if (!file) return;
+
         const reader = new FileReader();
         reader.onload = (evt) => {
             const data = evt.target.result;
             const workbook = XLSX.read(data, { type: "binary" });
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
             const raw = XLSX.utils.sheet_to_json(sheet);
+
             const imported = raw
-                .map((row) => ({
-                    questionText: String(row.Question || ""),
-                    options: [
+                .map((row) => {
+                    const options = [
                         String(row.Option1 ?? ""),
                         String(row.Option2 ?? ""),
                         String(row.Option3 ?? ""),
                         String(row.Option4 ?? ""),
-                    ].filter((opt) => opt !== ""),
-                    correctIdx: 0,
-                }))
+                    ].filter((opt) => opt !== "");
+
+                    let correctIdx = 0; // default index if no correct answer info
+
+                    if (typeof row.CorrectAnswer === "string") {
+                        const optionMap = { A: 0, B: 1, C: 2, D: 3 };
+                        const answerKey = row.CorrectAnswer.toUpperCase().trim();
+                        correctIdx = optionMap[answerKey] ?? 0;
+                        if (correctIdx >= options.length) correctIdx = 0;
+                    }
+
+                    return {
+                        questionText: String(row.Question || ""),
+                        options: options,
+                        correctIdx: correctIdx,
+                    };
+                })
                 .filter((q) => q.questionText.trim() && q.options.length >= 2);
+
             if (imported.length === 0) {
                 setImportStatus("No valid questions found in the file.");
                 setTimeout(() => setImportStatus(""), 2500);
                 return;
             }
-            console.log("Imported questions:", imported); // Debug log
+
+            console.log("Imported questions:", imported);
             setImportedQuestions(imported);
             setShowImportModal(true);
         };
