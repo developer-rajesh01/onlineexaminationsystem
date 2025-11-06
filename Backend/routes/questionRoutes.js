@@ -1,19 +1,32 @@
-import express from 'express';
-import Question from '../models/Question.js';
+// import express from "express";
+// import {
+//   addQuestion,
+//   getQuestionsByExam,
+//   deleteQuestion,
+// } from "../controllers/questionController.js";
+// import protect from "../middlewares/authMiddleware.js";
+
+// const router = express.Router();
+
+// router.post("/", protect, addQuestion);
+// router.get("/:examId", protect, getQuestionsByExam);
+// router.delete("/:id", protect, deleteQuestion);
+
+// export default router;
+
+
+import express from "express";
+import {
+  bulkAddQuestions,
+  getAllQuestions,
+} from "../controllers/questionController.js";
 
 const router = express.Router();
 
-router.post('/bulk', async (req, res) => {
-  try {
-    const questions = req.body.questions;
-    if (!Array.isArray(questions))
-      return res.status(400).json({ message: 'Questions must be an array' });
+// Bulk insert questions
+router.post("/bulk", bulkAddQuestions);
 
-    const savedQuestions = await Question.insertMany(questions);
-    res.status(201).json(savedQuestions);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
+// Get all questions
+router.get("/", getAllQuestions);
 
 export default router;

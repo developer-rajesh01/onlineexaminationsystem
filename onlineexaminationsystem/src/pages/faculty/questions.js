@@ -1,49 +1,62 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { FiUpload, FiTrash2 } from "react-icons/fi";
 
 function Questions() {
+  const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:5000";
+
+  // Function to create an empty new question template
   const createNewQuestion = () => ({
     id: Math.random().toString(36).substr(2, 9),
     questionText: "",
-    options: ["", ""],
+    options: ["", ""], // minimum two options
     correctAnswerIndex: 0,
   });
 
+  // Questions state with localStorage initialization
   const [questions, setQuestions] = useState(() => {
     const saved = localStorage.getItem("questions");
     if (saved) return JSON.parse(saved);
     return [createNewQuestion()];
   });
+
   const [importStatus, setImportStatus] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState({});
 
-  const fileRef = useRef();
-
+  // Persist questions in localStorage on change
   useEffect(() => {
     localStorage.setItem("questions", JSON.stringify(questions));
   }, [questions]);
 
-  // Validate a single question and update errors object
+  // Validate a single question fields
   const validateQuestion = (q, qIndex, baseErrors = {}) => {
     const newErrors = { ...baseErrors };
-    if (!q.questionText.trim()) {
-      newErrors[qIndex] = { ...newErrors[qIndex], questionText: "Question text is required" };
+    if (!q.questionText || !q.questionText.trim()) {
+      newErrors[qIndex] = {
+        ...newErrors[qIndex],
+        questionText: "Question text is required",
+      };
     } else {
       if (!newErrors[qIndex]) newErrors[qIndex] = {};
       newErrors[qIndex].questionText = null;
     }
-    if (q.options.slice(0, 2).some((opt) => !opt.trim())) {
-      newErrors[qIndex] = { ...newErrors[qIndex], options: "At least two options must be filled" };
+
+    // At least two filled options required
+    if (q.options.slice(0, 2).some((opt) => !opt || !opt.trim())) {
+      newErrors[qIndex] = {
+        ...newErrors[qIndex],
+        options: "At least two options must be filled",
+      };
     } else {
       if (!newErrors[qIndex]) newErrors[qIndex] = {};
       newErrors[qIndex].options = null;
     }
+
     return newErrors;
   };
 
-  // Validate all questions, update errors state, return overall validity
+  // Validate all questions; set errors state; return overall validity
   const validateAllQuestions = (qArr) => {
     let isValid = true;
     const newErrors = {};
@@ -55,7 +68,7 @@ function Questions() {
     return isValid;
   };
 
-  // Handlers for question text and options change
+  // Handler for changing question text
   const handleQuestionChange = (qIndex, value) => {
     const newQuestions = [...questions];
     newQuestions[qIndex].questionText = value;
@@ -63,6 +76,7 @@ function Questions() {
     setErrors(validateQuestion(newQuestions[qIndex], qIndex, errors));
   };
 
+  // Handler for changing options text
   const handleOptionChange = (qIndex, oIndex, value) => {
     const newQuestions = [...questions];
     newQuestions[qIndex].options[oIndex] = value;
@@ -70,14 +84,14 @@ function Questions() {
     setErrors(validateQuestion(newQuestions[qIndex], qIndex, errors));
   };
 
-  // Set correct answer index for a question
+  // Set the correct answer index for a question
   const setCorrectAnswer = (qIndex, oIndex) => {
     const newQuestions = [...questions];
     newQuestions[qIndex].correctAnswerIndex = oIndex;
     setQuestions(newQuestions);
   };
 
-  // Add option (max 4)
+  // Add an option to a question (max 4)
   const addOption = (qIndex) => {
     const newQuestions = [...questions];
     if (newQuestions[qIndex].options.length < 4) {
@@ -87,99 +101,177 @@ function Questions() {
     }
   };
 
-  // Remove option (min 2)
+  // Remove an option from a question (min 2 options)
   const removeOption = (qIndex, oIndex) => {
     const newQuestions = [...questions];
     if (newQuestions[qIndex].options.length > 2) {
       newQuestions[qIndex].options.splice(oIndex, 1);
+
+      // Adjust correctAnswerIndex if needed
       if (newQuestions[qIndex].correctAnswerIndex === oIndex) {
         newQuestions[qIndex].correctAnswerIndex = 0;
       } else if (newQuestions[qIndex].correctAnswerIndex > oIndex) {
         newQuestions[qIndex].correctAnswerIndex--;
       }
+
       setQuestions(newQuestions);
       setErrors(validateQuestion(newQuestions[qIndex], qIndex, errors));
     }
   };
 
-  // Add new question
+  // Add a new empty question
   const addQuestion = () => {
     setQuestions([...questions, createNewQuestion()]);
   };
 
-  // Delete question (minimum 1 question)
+  // Delete a question (cannot delete if only one left)
   const deleteQuestion = (qIndex) => {
     if (questions.length === 1) return;
     const newQuestions = [...questions];
     newQuestions.splice(qIndex, 1);
     setQuestions(newQuestions);
+
+    // Remove errors for deleted question and reset errors
     const newErrors = { ...errors };
     delete newErrors[qIndex];
     setErrors(newErrors);
   };
 
-  // Submit questions to backend bulk endpoint
+  // Submit all questions to backend
   const handleSubmit = async () => {
     if (!validateAllQuestions(questions)) {
       alert("Please fix all errors before submitting");
       return;
     }
     setIsSubmitting(true);
+
     try {
-      const res = await fetch("/api/questions/bulk", {
+      const url = `${API_BASE}/api/questions/bulk`;
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ questions }),
       });
-      if (!res.ok) throw new Error("Submit failed");
-      alert("Questions saved!");
+
+      const text = await res.text();
+      let body = null;
+      try {
+        body = JSON.parse(text);
+      } catch (e) {
+        body = text;
+      }
+
+      if (!res.ok) {
+        const message = body?.message || body || "Submit failed";
+        alert(`Submit failed: ${message}`);
+        return;
+      }
+
+      alert("Questions saved successfully!");
       setQuestions([createNewQuestion()]);
       setErrors({});
       localStorage.removeItem("questions");
     } catch (err) {
-      alert(err.message);
+      alert("Network error: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Handle Excel file import input
-  const handleFile = (e) => {
-    const file = e.target.files[0];
+  // Handle Excel file import and auto-submit
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const data = event.target.result;
-      const workbook = XLSX.read(data, { type: "binary" });
+
+    setImportStatus("Parsing file...");
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: "array" });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const rawJson = XLSX.utils.sheet_to_json(worksheet);
+      const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+      // Map Excel rows to question objects
       const importedQuestions = rawJson.map((row) => {
-        const optionsRaw = [row.Option1, row.Option2, row.Option3, row.Option4];
-        const options = optionsRaw
-          .map((opt) => (opt !== undefined && opt !== null ? String(opt).trim() : ""))
-          .filter((opt) => opt !== "");
+        const qText = row.Question ? String(row.Question).trim() : "";
+
+        const optsRaw = [
+          row.Option1 ?? "",
+          row.Option2 ?? "",
+          row.Option3 ?? "",
+          row.Option4 ?? "",
+        ].map((o) => (o === undefined || o === null ? "" : String(o).trim()));
+
+        // Filter out empty options, but ensure at least 2 options
+        const optsFiltered = optsRaw.filter((o) => o !== "");
+        while (optsFiltered.length < 2) optsFiltered.push("");
+
+        // Determine correctAnswerIndex using numeric or text match
+        let correctIndex = 0;
+        const ca = row.CorrectAnswer;
+        if (ca !== undefined && ca !== null && String(ca).trim() !== "") {
+          const caStr = String(ca).trim();
+          const asNum = Number(caStr);
+          if (!Number.isNaN(asNum)) {
+            if (asNum >= 1 && asNum <= optsFiltered.length)
+              correctIndex = asNum - 1;
+            else if (asNum >= 0 && asNum < optsFiltered.length) correctIndex = asNum;
+          } else {
+            const found = optsFiltered.findIndex(
+              (o) => o.toLowerCase() === caStr.toLowerCase()
+            );
+            if (found !== -1) correctIndex = found;
+          }
+        }
+
         return {
           id: Math.random().toString(36).substr(2, 9),
-          questionText: row.Question ? String(row.Question).trim() : "",
-          options: options.length > 0 ? options : ["", ""],
-          correctAnswerIndex:
-            typeof row.CorrectAnswer === "number" &&
-            row.CorrectAnswer >= 0 &&
-            row.CorrectAnswer < options.length
-              ? row.CorrectAnswer
-              : 0,
+          questionText: qText,
+          options: optsFiltered,
+          correctAnswerIndex: correctIndex,
         };
       });
-      setQuestions(importedQuestions.length > 0 ? importedQuestions : [createNewQuestion()]);
-      setImportStatus(`Imported ${importedQuestions.length} questions successfully`);
-      setTimeout(() => setImportStatus(null), 3000);
-      validateAllQuestions(importedQuestions);
-    };
-    reader.readAsBinaryString(file);
+
+      const importArr = importedQuestions.length > 0 ? importedQuestions : [createNewQuestion()];
+      setQuestions(importArr);
+      setImportStatus(`Imported ${importedQuestions.length} questions. Sending to server...`);
+      validateAllQuestions(importArr);
+
+      // Auto-submit imported questions
+      try {
+        const url = `${API_BASE}/api/questions/bulk`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ questions: importArr }),
+        });
+        const text = await res.text();
+
+        let body = null;
+        try {
+          body = JSON.parse(text);
+        } catch (err) {
+          body = text;
+        }
+
+        if (!res.ok) {
+          setImportStatus(`Import parsed but failed to save: ${body?.message || body || res.status}`);
+          return;
+        }
+
+        setImportStatus(`Saved ${importedQuestions.length} questions to DB.`);
+        setTimeout(() => setImportStatus(null), 3000);
+      } catch (err) {
+        setImportStatus(`Import parsed but failed to save: ${err.message}`);
+      }
+    } catch (err) {
+      setImportStatus("Failed to parse Excel file. Make sure the headers are correct.");
+    } finally {
+      setTimeout(() => setImportStatus(null), 4000);
+    }
   };
 
-  // Clear all questions and reset state
+  // Clear all questions and reset states
   const clearAll = () => {
     setQuestions([createNewQuestion()]);
     setErrors({});
@@ -187,14 +279,14 @@ function Questions() {
     localStorage.removeItem("questions");
   };
 
-  // Disable submit if any validation errors exist
+  // Determine if submit button should be disabled (any errors present)
   const isSubmitDisabled = questions.some(
     (q, qi) => errors[qi]?.questionText || errors[qi]?.options
   );
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-8 bg-gray-50 min-h-screen">
-      {/* Import and Clear Section */}
+      {/* Import and Clear controls */}
       <div className="flex items-center justify-between bg-gradient-to-r from-indigo-900 to-indigo-700 p-4 rounded-lg shadow-lg">
         <div className="flex items-center space-x-4">
           <label
@@ -221,19 +313,23 @@ function Questions() {
             Clear All
           </button>
         </div>
+
         <div className="text-gray-100 font-semibold">
           Total Questions: {questions.length}
         </div>
       </div>
 
-      {/* Import Feedback */}
+      {/* Import status message */}
       {importStatus && (
-        <div className="bg-teal-100 text-teal-800 p-3 rounded-lg shadow-md transform animate-slide-in" role="status">
+        <div
+          className="bg-teal-100 text-teal-800 p-3 rounded-lg shadow-md transform animate-slide-in"
+          role="status"
+        >
           {importStatus}
         </div>
       )}
 
-      {/* Question Cards */}
+      {/* Questions list */}
       {questions.map((q, qi) => (
         <div
           key={q.id || qi}
@@ -250,11 +346,19 @@ function Questions() {
               &times;
             </button>
           )}
+
+          {/* Question text input */}
           <div className="space-y-2">
-            <label htmlFor={`question-${qi}`} className="block text-gray-700 font-semibold">Question</label>
+            <label
+              htmlFor={`question-${qi}`}
+              className="block text-gray-700 font-semibold"
+            >
+              Question
+            </label>
             <textarea
               id={`question-${qi}`}
-              className={`w-full p-3 border rounded-lg bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-400 focus:border-transparent hover:shadow-md transform hover:scale-[1.01] transition-all duration-200 resize-none ${errors[qi]?.questionText ? "border-red-400" : "border-blue-300"}`}
+              className={`w-full p-3 border rounded-lg bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-400 focus:border-transparent hover:shadow-md transform hover:scale-[1.01] transition-all duration-200 resize-none ${errors[qi]?.questionText ? "border-red-400" : "border-blue-300"
+                }`}
               value={q.questionText}
               onChange={(e) => handleQuestionChange(qi, e.target.value)}
               placeholder="Enter your question here..."
@@ -266,6 +370,8 @@ function Questions() {
               <p className="text-red-400 text-sm">{errors[qi].questionText}</p>
             )}
           </div>
+
+          {/* Options and correct answer radio buttons */}
           <div className="space-y-4 mt-4">
             {q.options.map((opt, oi) => (
               <div key={oi} className="flex items-center space-x-3 group">
@@ -282,7 +388,8 @@ function Questions() {
                   placeholder={`Option ${oi + 1}`}
                   value={opt}
                   onChange={(e) => handleOptionChange(qi, oi, e.target.value)}
-                  className={`flex-grow px-3 py-2 border rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-400 focus:border-transparent hover:shadow-md transition-all duration-200 ${oi < 2 && !opt.trim() ? "border-red-400" : "border-blue-300"}`}
+                  className={`flex-grow px-3 py-2 border rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-400 focus:border-transparent hover:shadow-md transition-all duration-200 ${oi < 2 && !opt.trim() ? "border-red-400" : "border-blue-300"
+                    }`}
                   required={oi < 2}
                   aria-required={oi < 2}
                   aria-invalid={oi < 2 && !opt.trim()}
@@ -300,9 +407,11 @@ function Questions() {
                 )}
               </div>
             ))}
+
             {errors[qi]?.options && (
               <p className="text-red-400 text-sm">{errors[qi].options}</p>
             )}
+
             {q.options.length < 4 && (
               <button
                 type="button"
@@ -317,7 +426,7 @@ function Questions() {
         </div>
       ))}
 
-      {/* Action Buttons */}
+      {/* Action buttons */}
       <div className="flex space-x-4 justify-end">
         <button
           type="button"
@@ -331,16 +440,13 @@ function Questions() {
           onClick={handleSubmit}
           disabled={isSubmitting || isSubmitDisabled}
           className={`flex items-center justify-center px-6 py-3 rounded-lg text-white transition-all duration-200 ${isSubmitting || isSubmitDisabled
-            ? "bg-indigo-400 opacity-50 cursor-not-allowed"
-            : "bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg transform hover:scale-105"
+              ? "bg-indigo-400 opacity-50 cursor-not-allowed"
+              : "bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg transform hover:scale-105"
             }`}
         >
           {isSubmitting ? (
             <>
-              <svg
-                className="animate-spin h-5 w-5 mr-2"
-                viewBox="0 0 24 24"
-              >
+              <svg className="animate-spin h-5 w-5 mr-2" viewBox="0 0 24 24">
                 <circle
                   className="opacity-25"
                   cx="12"
