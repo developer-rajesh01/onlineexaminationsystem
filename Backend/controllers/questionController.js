@@ -42,36 +42,29 @@
 //   }
 // };
 
+
 import Question from "../models/Question.js";
 
 export const bulkAddQuestions = async (req, res) => {
   try {
-    const { questions } = req.body;
-    if (!questions || !Array.isArray(questions) || questions.length === 0) {
-      return res.status(400).json({ message: "No questions provided" });
+    console.log("bulkAddQuestions - headers:", req.headers);
+    console.log("bulkAddQuestions - body:", JSON.stringify(req.body).slice(0, 2000));
+
+    if (!req.body || !Array.isArray(req.body.questions) || req.body.questions.length === 0) {
+      return res.status(400).json({ message: "No questions provided in body" });
     }
 
-    // normalize & validate server-side (basic)
-    const formatted = questions.map((q) => ({
+    const formatted = req.body.questions.map(q => ({
       questionText: q.questionText || "",
-      options: (q.options || [])
-        .slice(0, 4)
-        .map((opt) => ({ text: String(opt || "") })),
-      correctAnswerIndex: Number.isFinite(q.correctAnswerIndex)
-        ? q.correctAnswerIndex
-        : 0,
+      options: (q.options || []).slice(0, 4).map(opt => ({ text: String(opt || "") })),
+      correctAnswerIndex: Number.isFinite(q.correctAnswerIndex) ? q.correctAnswerIndex : 0,
     }));
 
     const saved = await Question.insertMany(formatted);
-    return res.status(201).json({
-      message: `${saved.length} questions saved successfully`,
-      data: saved,
-    });
+    return res.status(201).json({ message: `${saved.length} questions saved`, data: saved });
   } catch (err) {
     console.error("bulkAddQuestions error:", err);
-    return res
-      .status(500)
-      .json({ message: "Server error", error: err.message });
+    return res.status(500).json({ message: "Server error", error: err.message });
   }
 };
 
@@ -83,5 +76,3 @@ export const getAllQuestions = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
-

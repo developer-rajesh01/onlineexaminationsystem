@@ -2,7 +2,16 @@ import React, { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { FiUpload, FiTrash2 } from "react-icons/fi";
 
+/**
+ * Questions Component (fixed)
+ * - Uses API_BASE (from env or fallback) so requests go to correct backend
+ * - handleFile auto-parses Excel and auto-submits to backend
+ * - handleSubmit posts all questions to backend
+ */
+
 function Questions() {
+  const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:5000";
+
   const createNewQuestion = () => ({
     id: Math.random().toString(36).substr(2, 9),
     questionText: "",
@@ -26,7 +35,7 @@ function Questions() {
   // Validate a single question, updating errors object
   const validateQuestion = (q, qIndex, baseErrors = {}) => {
     const newErrors = { ...baseErrors };
-    if (!q.questionText.trim()) {
+    if (!q.questionText || !q.questionText.trim()) {
       newErrors[qIndex] = {
         ...newErrors[qIndex],
         questionText: "Question text is required",
@@ -35,7 +44,7 @@ function Questions() {
       if (!newErrors[qIndex]) newErrors[qIndex] = {};
       newErrors[qIndex].questionText = null;
     }
-    if (q.options.slice(0, 2).some((opt) => !opt.trim())) {
+    if (q.options.slice(0, 2).some((opt) => !opt || !opt.trim())) {
       newErrors[qIndex] = {
         ...newErrors[qIndex],
         options: "At least two options must be filled",
@@ -116,6 +125,7 @@ function Questions() {
     setErrors(newErrors);
   };
 
+  // ---------- SUBMIT ALL QUESTIONS ----------
   const handleSubmit = async () => {
     if (!validateAllQuestions(questions)) {
       alert("Please fix all errors before submitting");
@@ -123,66 +133,43 @@ function Questions() {
     }
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/questions/bulk", {
+      // Post to explicit backend URL using API_BASE
+      const url = `${API_BASE}/api/questions/bulk`;
+      console.log("Posting to:", url);
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ questions }),
       });
-      if (!res.ok) throw new Error("Submit failed");
+
+      const text = await res.text();
+      let body = null;
+      try {
+        body = JSON.parse(text);
+      } catch (e) {
+        body = text;
+      }
+
+      if (!res.ok) {
+        console.error("Submit failed:", res.status, body);
+        const message = body?.message || body || "Submit failed";
+        alert(`Submit failed: ${message}`);
+        return;
+      }
+
       alert("Questions saved!");
       setQuestions([createNewQuestion()]);
       setErrors({});
       localStorage.removeItem("questions");
     } catch (err) {
-      alert(err.message);
+      console.error("Network error while submitting:", err);
+      alert("Network error: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // const handleFile = (e) => {
-  //     const file = e.target.files[0];
-  //     if (!file) return;
-  //     const reader = new FileReader();
-  //     reader.onload = (event) => {
-  //         const data = event.target.result;
-  //         const workbook = XLSX.read(data, { type: "binary" });
-  //         const sheetName = workbook.SheetNames[0];
-  //         const worksheet = workbook.Sheets[sheetName];
-  //         const rawJson = XLSX.utils.sheet_to_json(worksheet);
-  //         const importedQuestions = rawJson.map((row) => {
-  //             const optionsRaw = [
-  //                 row.Option1,
-  //                 row.Option2,
-  //                 row.Option3,
-  //                 row.Option4,
-  //             ];
-  //             const options = optionsRaw
-  //                 .map((opt) => (opt !== undefined && opt !== null ? String(opt).trim() : ""))
-  //                 .filter((opt) => opt !== "");
-  //             return {
-  //                 id: Math.random().toString(36).substr(2, 9),
-  //                 questionText: row.Question ? String(row.Question).trim() : "",
-  //                 options: options.length > 0 ? options : ["", ""],
-  //                 correctAnswerIndex:
-  //                     typeof row.CorrectAnswer === "number" &&
-  //                         row.CorrectAnswer >= 0 &&
-  //                         row.CorrectAnswer < options.length
-  //                         ? row.CorrectAnswer
-  //                         : 0,
-  //             };
-  //         });
-  //         const importArr = importedQuestions.length > 0 ?
-  //             importedQuestions : [createNewQuestion()];
-  //         setQuestions(importArr);
-  //         setImportStatus(`Imported ${importedQuestions.length} questions successfully`);
-  //         setTimeout(() => setImportStatus(null), 3000);
-  //         validateAllQuestions(importArr);
-  //     };
-  //     reader.readAsBinaryString(file);
-  // };
-
-  // replace your existing handleFile with this
+  // ---------- HANDLE EXCEL FILE IMPORT (auto-submit) ----------
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -193,7 +180,7 @@ function Questions() {
       const workbook = XLSX.read(arrayBuffer, { type: "array" });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: "" }); // defval ensures missing cells are ""
+      const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: "" }); // ensure missing cells -> ""
 
       // Expected headers: Question, Option1, Option2, Option3, Option4, CorrectAnswer
       const importedQuestions = rawJson.map((row, idx) => {
@@ -210,21 +197,18 @@ function Questions() {
         while (optsFiltered.length < 2) optsFiltered.push("");
 
         // determine correctAnswerIndex:
-        // Accept either numeric index (0-based or 1-based) OR option text
+        // Accept numeric index (0-based or 1-based) OR option text
         let correctIndex = 0;
         const ca = row.CorrectAnswer;
         if (ca !== undefined && ca !== null && String(ca).trim() !== "") {
           const caStr = String(ca).trim();
-          // numeric?
           const asNum = Number(caStr);
           if (!Number.isNaN(asNum)) {
-            // if user provided 1-based index (common), try to detect:
             if (asNum >= 1 && asNum <= optsFiltered.length)
               correctIndex = asNum - 1;
             else if (asNum >= 0 && asNum < optsFiltered.length)
               correctIndex = asNum;
           } else {
-            // match by option text (case-insensitive)
             const found = optsFiltered.findIndex(
               (o) => o.toLowerCase() === caStr.toLowerCase()
             );
@@ -240,7 +224,6 @@ function Questions() {
         };
       });
 
-      // if no rows -> fallback to single empty question
       const importArr =
         importedQuestions.length > 0
           ? importedQuestions
@@ -253,25 +236,36 @@ function Questions() {
 
       // Auto-submit to backend
       try {
-        const res = await fetch("/api/questions/bulk", {
+        const url = `${API_BASE}/api/questions/bulk`;
+        console.log("Auto-posting to:", url, "payload size:", importArr.length);
+        const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ questions: importArr }),
         });
 
-        if (!res.ok) {
-          const errText = await res.text().catch(() => "");
-          throw new Error(
-            errText || "Server returned error while saving questions"
-          );
+        const text = await res.text();
+        let body = null;
+        try {
+          body = JSON.parse(text);
+        } catch (err) {
+          body = text;
         }
 
-        const data = await res.json();
+        if (!res.ok) {
+          console.error("Auto-submit failed:", res.status, body);
+          setImportStatus(
+            `Import parsed but failed to save: ${
+              body?.message || body || res.status
+            }`
+          );
+          return;
+        }
+
         setImportStatus(`Saved ${importedQuestions.length} questions to DB.`);
-        // optionally show success toast / clear local storage
         setTimeout(() => setImportStatus(null), 3000);
       } catch (err) {
-        console.error("Auto-submit error:", err);
+        console.error("Auto-submit network error:", err);
         setImportStatus(`Import parsed but failed to save: ${err.message}`);
       }
     } catch (err) {
@@ -386,6 +380,7 @@ function Questions() {
               <p className="text-red-400 text-sm">{errors[qi].questionText}</p>
             )}
           </div>
+
           <div className="space-y-4 mt-4">
             {q.options.map((opt, oi) => (
               <div key={oi} className="flex items-center space-x-3 group">
