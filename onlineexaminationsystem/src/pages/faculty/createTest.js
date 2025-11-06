@@ -4,18 +4,16 @@ import * as XLSX from "xlsx";
 
 const QUESTIONS_PER_PAGE = 10;
 
-// Fake async MongoDB save
-const saveQuestionsToDB = async (data) => {
-    return new Promise((res) =>
+// Simulated async save to DB placeholder; replace with real API call
+const saveQuestionsToDB = async (data) =>
+    new Promise((res) =>
         setTimeout(() => {
             console.log("Saved to MongoDB:", data);
             res({ success: true });
         }, 1000)
     );
-};
 
 function CreateTest() {
-    // Initialize state with data from localStorage if available
     const [quiz, setQuiz] = useState(() => {
         const savedQuiz = localStorage.getItem("quizData");
         return savedQuiz
@@ -48,7 +46,7 @@ function CreateTest() {
     const [importStatus, setImportStatus] = useState("");
     const fileRef = useRef();
 
-    // Save quiz and questions to localStorage whenever they change
+    // Persist quiz and questions in localStorage
     useEffect(() => {
         localStorage.setItem("quizData", JSON.stringify(quiz));
     }, [quiz]);
@@ -57,7 +55,7 @@ function CreateTest() {
         localStorage.setItem("questionsData", JSON.stringify(questions));
     }, [questions]);
 
-    // Validate quiz information
+    // Validation helpers
     const validateQuiz = () => {
         const newErrors = {};
         const requiredFields = [
@@ -70,21 +68,19 @@ function CreateTest() {
             "totalMarks",
         ];
         requiredFields.forEach((field) => {
-            if (!quiz[field].trim()) {
+            if (!quiz[field] || !quiz[field].toString().trim()) {
                 newErrors[field] = true;
             }
         });
         return newErrors;
     };
 
-    // Validate a single question
     const validateQuestion = (q) => ({
         questionText: !q.questionText?.trim(),
         options: q.options.map((opt) => !String(opt || "").trim()),
         minOptions: q.options.filter((opt) => String(opt || "").trim()).length < 2,
     });
 
-    // Validate all questions
     const validateQuestions = () => {
         const newErrors = {};
         let hasValidQuestion = false;
@@ -103,12 +99,14 @@ function CreateTest() {
         return { errors: newErrors, hasValidQuestion };
     };
 
+    // Handlers for quiz info changes
     const handleQuizChange = (field, val) => {
         setQuiz((prev) => ({ ...prev, [field]: val }));
         setQuizErrors((prev) => ({ ...prev, [field]: !val.trim() }));
         setValidationMessage("");
     };
 
+    // Handlers for question changes
     const handleQChange = (idx, val) => {
         const updated = [...questions];
         updated[idx].questionText = val;
@@ -156,7 +154,7 @@ function CreateTest() {
     };
 
     const deleteQuestion = (idx) => {
-        if (questions.length === 1) return;
+        if (questions.length === 1) return; // prevent deleting last question silently
         const updated = questions.filter((_, i) => i !== idx);
         setQuestions(updated);
         setErrors((prev) => {
@@ -165,12 +163,14 @@ function CreateTest() {
         });
     };
 
+    // Pagination logic
     const numPages = Math.ceil(questions.length / QUESTIONS_PER_PAGE);
     const pagedQuestions = questions.slice(
         currentPage * QUESTIONS_PER_PAGE,
         (currentPage + 1) * QUESTIONS_PER_PAGE
     );
 
+    // Clear all quiz and question data
     const clearAll = () => {
         setQuestions([{ questionText: "", options: ["", ""], correctIdx: 0 }]);
         setQuiz({
@@ -190,6 +190,8 @@ function CreateTest() {
         localStorage.removeItem("quizData");
         localStorage.removeItem("questionsData");
     };
+
+    // Import from Excel .xlsx or .xls file
     const handleImport = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -210,7 +212,7 @@ function CreateTest() {
                         String(row.Option4 ?? ""),
                     ].filter((opt) => opt !== "");
 
-                    let correctIdx = 0; // default index if no correct answer info
+                    let correctIdx = 0; // default
 
                     if (typeof row.CorrectAnswer === "string") {
                         const optionMap = { A: 0, B: 1, C: 2, D: 3 };
@@ -233,15 +235,15 @@ function CreateTest() {
                 return;
             }
 
-            console.log("Imported questions:", imported);
             setImportedQuestions(imported);
             setShowImportModal(true);
         };
         reader.readAsBinaryString(file);
     };
 
+    // Confirm import and save imported questions
     const handleImportYes = async () => {
-        await saveQuestionsToDB(importedQuestions);
+        await saveQuestionsToDB(importedQuestions); // Replace with real API call if needed
         setQuestions((prev) => [...prev, ...importedQuestions]);
         setImportStatus(`${importedQuestions.length} questions imported & saved!`);
         setShowImportModal(false);
@@ -256,6 +258,7 @@ function CreateTest() {
         setTimeout(() => setImportStatus(""), 2500);
     };
 
+    // Import but don't save
     const handleImportNo = () => {
         setQuestions((prev) => [...prev, ...importedQuestions]);
         setImportStatus(`${importedQuestions.length} questions imported (not saved to DB)!`);
@@ -271,42 +274,50 @@ function CreateTest() {
         setTimeout(() => setImportStatus(""), 2500);
     };
 
-    const handleCreateTest = () => {
-        // Validate quiz information
+    // Submit quiz and questions to backend API
+    const handleCreateTest = async () => {
         const quizValidationErrors = validateQuiz();
-        setQuizErrors(quizValidationErrors);
-
-        // Validate questions
         const { errors: questionErrors, hasValidQuestion } = validateQuestions();
+
+        setQuizErrors(quizValidationErrors);
         setErrors(questionErrors);
 
-        // Check if validation passes
-        if (Object.keys(quizValidationErrors).length > 0 || !hasValidQuestion) {
-            const messages = [];
-            if (Object.keys(quizValidationErrors).length > 0) {
-                messages.push("Please fill in all required quiz information fields.");
-            }
-            if (!hasValidQuestion) {
-                messages.push(
-                    "At least one question with a valid question text and at least two non-empty options is required."
-                );
-            }
+        const messages = [];
+        if (Object.keys(quizValidationErrors).length > 0) {
+            messages.push("Please fill in all required quiz information fields.");
+        }
+        if (!hasValidQuestion) {
+            messages.push(
+                "At least one question with valid question text and at least two non-empty options is required."
+            );
+        }
+        if (messages.length > 0) {
             setValidationMessage(messages.join(" "));
             return;
         }
 
-        // If validation passes, proceed to save
-        console.log("QUIZ DATA SUBMITTED:", { ...quiz, questions });
-        alert("Test saved! See console for stored object.");
-        setValidationMessage("");
-        // Optionally clear localStorage after saving
-        localStorage.removeItem("quizData");
-        localStorage.removeItem("questionsData");
+        try {
+            const response = await fetch("http://localhost:5000/api/tests", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ...quiz, questions }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || "Failed to create test");
+            }
+
+            alert("Test created successfully!");
+            clearAll();
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        }
     };
 
     return (
         <div className="relative min-h-screen bg-gradient-to-br from-gray-50 to-indigo-100 py-8">
-            {/* Top "Save All" Button */}
+            {/* Create Button */}
             <button
                 className="fixed right-6 top-20 px-8 py-3 bg-indigo-600 text-white font-semibold rounded-full shadow-lg hover:bg-indigo-700 transition transform hover:scale-105 z-50"
                 onClick={handleCreateTest}
@@ -315,18 +326,19 @@ function CreateTest() {
             </button>
 
             <div className="max-w-4xl mx-auto px-4">
+                {/* Title */}
                 <h1 className="text-4xl font-extrabold text-center text-indigo-900 mb-8">
-                    {quiz.title.trim() ? `${quiz.title}` : "Create a New Test"}
+                    {quiz.title.trim() ? quiz.title : "Create a New Test"}
                 </h1>
 
-                {/* Validation Error Message */}
+                {/* Validation Message */}
                 {validationMessage && (
                     <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg">
                         {validationMessage}
                     </div>
                 )}
 
-                {/* Quiz Information Section */}
+                {/* Quiz Info Inputs */}
                 <section className="mb-10 p-6 bg-white rounded-2xl shadow-xl border border-gray-200">
                     <h2 className="text-2xl font-bold text-indigo-900 border-b border-indigo-200 pb-3 mb-6">
                         Information
@@ -355,7 +367,7 @@ function CreateTest() {
                     </div>
                 </section>
 
-                {/* Question Action Bar */}
+                {/* Actions Bar */}
                 <div className="flex items-center justify-between p-4 bg-white rounded-2xl shadow-md mb-6 border border-gray-200">
                     <div className="flex gap-4">
                         <button
@@ -383,9 +395,7 @@ function CreateTest() {
                             </div>
                         </div>
                     </div>
-                    <span className="font-semibold text-lg text-indigo-900">
-                        Total Questions: {questions.length}
-                    </span>
+                    <span className="font-semibold text-lg text-indigo-900">Total Questions: {questions.length}</span>
                 </div>
 
                 {/* Import Confirmation Modal */}
@@ -438,13 +448,9 @@ function CreateTest() {
                             >
                                 &times;
                             </button>
-                            <div className="text-lg font-semibold text-indigo-900 mb-4">
-                                Question {globalIdx + 1}
-                            </div>
+                            <div className="text-lg font-semibold text-indigo-900 mb-4">Question {globalIdx + 1}</div>
                             <textarea
-                                className={`w-full p-4 rounded-lg border ${errors[globalIdx]?.questionText
-                                    ? "border-red-400"
-                                    : "border-gray-300"
+                                className={`w-full p-4 rounded-lg border ${errors[globalIdx]?.questionText ? "border-red-400" : "border-gray-300"
                                     } bg-gray-50 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition`}
                                 rows={3}
                                 placeholder="Enter your question here..."
@@ -465,8 +471,8 @@ function CreateTest() {
                                         type="text"
                                         required
                                         className={`flex-1 p-3 rounded-lg border ${errors[globalIdx]?.options && errors[globalIdx].options[oi]
-                                            ? "border-red-400"
-                                            : "border-gray-300"
+                                                ? "border-red-400"
+                                                : "border-gray-300"
                                             } bg-gray-50 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition`}
                                         placeholder={`Option ${oi + 1}`}
                                         value={opt}

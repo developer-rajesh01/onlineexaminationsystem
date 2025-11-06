@@ -3,6 +3,15 @@ import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import image from "../assets/login.jpg";
 
+const institutes = [
+  "Institute A",
+  "Institute B",
+  "Institute C",
+  "Institute of Technology",
+  "Institute of Science",
+  "New Horizon Institute",
+];
+
 function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
@@ -12,18 +21,47 @@ function Register() {
     email: "",
     password: "",
     role: "",
+    institute: "",
   });
 
-  const payload = {
-    _id: formData.email,
-    name: formData.name,
-    email: formData.email,
-    password: formData.password,
-    role: formData.role,
+  const [filteredInstitutes, setFilteredInstitutes] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const onInstituteInputChange = (e) => {
+    const userInput = e.target.value;
+    setFormData({ ...formData, institute: userInput });
+
+    if (userInput.length > 0) {
+      const filtered = institutes.filter((inst) =>
+        inst.toLowerCase().includes(userInput.toLowerCase())
+      );
+      setFilteredInstitutes(filtered);
+      setShowSuggestions(true);
+    } else {
+      setShowSuggestions(false);
+      setFilteredInstitutes([]);
+    }
+  };
+
+  const onSuggestionClick = (suggestion) => {
+    setFormData({ ...formData, institute: suggestion });
+    setFilteredInstitutes([]);
+    setShowSuggestions(false);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    const userId = formData.institute + formData.email;
+
+    const payload = {
+      _id: userId,
+      name: formData.name,
+      email: formData.email,
+      password: formData.password,
+      role: formData.role,
+      institute: formData.institute,
+    };
 
     try {
       const res = await axios.post(
@@ -38,7 +76,7 @@ function Register() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center  px-2">
+    <div className="min-h-screen flex items-center justify-center px-2">
       <div
         className="
           w-full max-w-4xl
@@ -49,7 +87,6 @@ function Register() {
         "
         style={{ willChange: "transform" }}
       >
-        {/* Left side - Registration form */}
         <div className="md:w-1/2 w-full p-10 flex flex-col justify-center bg-gradient-to-br from-blue-50 to-gray-100">
           <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">
             Create an account
@@ -93,6 +130,34 @@ function Register() {
               <option value="faculty">Faculty</option>
               <option value="student">Student</option>
             </select>
+
+            {/* Autocomplete Institute Input */}
+            <div className="relative mb-4">
+              <input
+                type="text"
+                name="institute"
+                value={formData.institute}
+                onChange={onInstituteInputChange}
+                placeholder="Institute Name"
+                className="w-full px-4 py-3 rounded-xl bg-white border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                autoComplete="off"
+                required
+              />
+              {showSuggestions && filteredInstitutes.length > 0 && (
+                <ul className="absolute bg-white border border-gray-300 w-full rounded-xl max-h-40 overflow-auto z-10">
+                  {filteredInstitutes.map((inst, index) => (
+                    <li
+                      key={index}
+                      className="cursor-pointer px-4 py-2 hover:bg-blue-100"
+                      onClick={() => onSuggestionClick(inst)}
+                    >
+                      {inst}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
             <div className="relative mb-6">
               <input
                 type={showPassword ? "text" : "password"}
@@ -114,6 +179,7 @@ function Register() {
                 {showPassword ? "Hide" : "Show"}
               </button>
             </div>
+
             <button
               type="submit"
               className="w-full bg-blue-600 hover:bg-blue-700 transition text-white py-3 rounded-xl font-semibold mb-2"
@@ -130,11 +196,10 @@ function Register() {
           </div>
         </div>
 
-        {/* Right side - Image */}
         <div
           className="md:w-1/2 w-full relative flex flex-col justify-center items-center bg-center bg-cover"
           style={{
-            backgroundImage: `url(${ image })`,
+            backgroundImage: `url(${image})`,
           }}
         ></div>
       </div>
