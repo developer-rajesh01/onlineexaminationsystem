@@ -30,6 +30,17 @@ function CreateTest() {
             };
     });
 
+    const [institute, setInstitute] = useState("");
+
+    // Load institute & author from localStorage
+    useEffect(() => {
+        const inst = localStorage.getItem("institute") || "";
+        const authorFromStorage =
+            localStorage.getItem("author") || localStorage.getItem("name") || localStorage.getItem("email") || "";
+        setQuiz((prev) => ({ ...prev, institute: inst, author: authorFromStorage }));
+        setInstitute(inst);
+    }, []);
+
     const [questions, setQuestions] = useState(() => {
         const savedQuestions = localStorage.getItem("questionsData");
         return savedQuestions
@@ -46,6 +57,22 @@ function CreateTest() {
     const [importStatus, setImportStatus] = useState("");
     const fileRef = useRef();
 
+    // Audience suggestion data
+    const COURSES = [
+        "BCA",
+        "MCA",
+        "BTech",
+        "B.Sc",
+        "B.A",
+        "M.Sc",
+        "BCom",
+        "MBA",
+        "Diploma",
+    ];
+    const BATCHES = Array.from({ length: 10 }, (_, i) => `Batch${i + 1}`);
+
+    const [audienceSuggestions, setAudienceSuggestions] = useState([]);
+
     // Persist quiz and questions in localStorage
     useEffect(() => {
         localStorage.setItem("quizData", JSON.stringify(quiz));
@@ -56,6 +83,8 @@ function CreateTest() {
     }, [questions]);
 
     // Validation helpers
+    const todayStr = () => new Date().toISOString().split("T")[0];
+
     const validateQuiz = () => {
         const newErrors = {};
         const requiredFields = [
@@ -64,7 +93,7 @@ function CreateTest() {
             "startDate",
             "startTime",
             "targetAudience",
-            "author",
+            // author removed from required fields because it's taken from localStorage automatically
             "totalMarks",
         ];
         requiredFields.forEach((field) => {
@@ -72,6 +101,26 @@ function CreateTest() {
                 newErrors[field] = true;
             }
         });
+
+        // startDate must be today or future
+        if (quiz.startDate && quiz.startDate < todayStr()) {
+            newErrors.startDate = "Date cannot be in the past";
+        }
+
+        // passMarks must be less than totalMarks (if provided)
+        if (
+            quiz.passMarks !== "" &&
+            quiz.passMarks !== undefined &&
+            quiz.totalMarks !== "" &&
+            quiz.totalMarks !== undefined
+        ) {
+            const pm = Number(quiz.passMarks);
+            const tm = Number(quiz.totalMarks);
+            if (!isNaN(pm) && !isNaN(tm) && pm >= tm) {
+                newErrors.passMarks = "Pass marks must be smaller than total marks";
+            }
+        }
+
         return newErrors;
     };
 
@@ -101,8 +150,53 @@ function CreateTest() {
 
     // Handlers for quiz info changes
     const handleQuizChange = (field, val) => {
+        // date cannot be in past -- immediate feedback
+        if (field === "startDate") {
+            if (val && val < todayStr()) {
+                setQuizErrors((prev) => ({ ...prev, startDate: true }));
+                setValidationMessage("Start date cannot be before today.");
+                setQuiz((prev) => ({ ...prev, [field]: val })); // still set value so user can correct
+                return;
+            } else {
+                setQuizErrors((prev) => {
+                    const { startDate, ...rest } = prev;
+                    return rest;
+                });
+            }
+        }
+
+        // Target audience change -> update suggestions using datalist (simple UX)
+        if (field === "targetAudience") {
+            // keep the full comma-separated value in the input
+            setQuiz((prev) => ({ ...prev, [field]: val }));
+
+            // build suggestions based on the last token being typed
+            const tokens = val.split(",").map((t) => t.trim()).filter(Boolean);
+            const last = tokens.length ? tokens[tokens.length - 1] : "";
+            const term = last.toLowerCase();
+
+            const matches = [];
+            if (!term) {
+                // show common courses + batches if empty (helps discoverability)
+                matches.push(...COURSES.concat(BATCHES));
+            } else {
+                matches.push(
+                    ...COURSES.filter((c) => c.toLowerCase().includes(term)),
+                    ...BATCHES.filter((b) => b.toLowerCase().includes(term))
+                );
+            }
+
+            // remove duplicates
+            const uniq = Array.from(new Set(matches));
+            setAudienceSuggestions(uniq.slice(0, 20));
+
+            setQuizErrors((prev) => ({ ...prev, targetAudience: !val.trim() }));
+            setValidationMessage("");
+            return;
+        }
+
         setQuiz((prev) => ({ ...prev, [field]: val }));
-        setQuizErrors((prev) => ({ ...prev, [field]: !val.trim() }));
+        setQuizErrors((prev) => ({ ...prev, [field]: !String(val || "").trim() }));
         setValidationMessage("");
     };
 
@@ -179,9 +273,10 @@ function CreateTest() {
             startDate: "",
             startTime: "",
             targetAudience: "",
-            author: "",
+            author: localStorage.getItem("author") || localStorage.getItem("name") || localStorage.getItem("email") || "",
             passMarks: "",
             totalMarks: "",
+            institute: "",
         });
         setCurrentPage(0);
         setErrors({});
@@ -274,7 +369,18 @@ function CreateTest() {
         setTimeout(() => setImportStatus(""), 2500);
     };
 
+    const [isCreating, setIsCreating] = useState(false);
+    const [facultyEmail, setFacultyEmail] = useState("");
+    useEffect(() => {
+        const email = localStorage.getItem("email");
+        if (email) setFacultyEmail(email);
+        // ensure author kept in sync if it changes externally
+        const authorFromStorage = localStorage.getItem("author") || localStorage.getItem("name") || localStorage.getItem("email") || "";
+        setQuiz((prev) => ({ ...prev, author: authorFromStorage }));
+    }, []);
+
     // Submit quiz and questions to backend API
+    // Replace your handleCreateTest with this improved version
     const handleCreateTest = async () => {
         const quizValidationErrors = validateQuiz();
         const { errors: questionErrors, hasValidQuestion } = validateQuestions();
@@ -284,7 +390,7 @@ function CreateTest() {
 
         const messages = [];
         if (Object.keys(quizValidationErrors).length > 0) {
-            messages.push("Please fill in all required quiz information fields.");
+            messages.push("Please fix the highlighted quiz information fields.");
         }
         if (!hasValidQuestion) {
             messages.push(
@@ -296,34 +402,82 @@ function CreateTest() {
             return;
         }
 
+        // Prepare payload (flattened, numeric conversions)
+        const payload = {
+            title: quiz.title.trim(),
+            duration: Number(quiz.duration),
+            startDate: quiz.startDate,
+            startTime: quiz.startTime,
+            targetAudience: quiz.targetAudience.trim(),
+            author: quiz.author?.trim() || (localStorage.getItem("author") || localStorage.getItem("name") || localStorage.getItem("email") || ""),
+            passMarks: quiz.passMarks ? Number(quiz.passMarks) : undefined,
+            totalMarks: Number(quiz.totalMarks),
+            institute: quiz.institute?.trim() || "",
+            questions,
+            facultyEmail,
+        };
+
+        // minimal cleanup
+        Object.keys(payload).forEach((k) => {
+            if (payload[k] === undefined) delete payload[k];
+        });
+
+        console.log("Final payload:", payload);
+
+        setIsCreating(true);
         try {
             const response = await fetch("http://localhost:5000/api/tests", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ...quiz, questions }),
+                body: JSON.stringify(payload),
             });
 
+            const text = await response.text().catch(() => "");
+            let data;
+            try {
+                data = text ? JSON.parse(text) : null;
+            } catch (e) {
+                data = { message: text || null };
+            }
+
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || "Failed to create test");
+                console.error("Create test failed:", response.status, data);
+                throw new Error(data?.message || `Server responded with ${response.status}`);
             }
 
             alert("Test created successfully!");
             clearAll();
         } catch (error) {
-            alert(`Error: ${error.message}`);
+            console.error("handleCreateTest error:", error);
+            alert(`Error creating test: ${error.message}`);
+        } finally {
+            setIsCreating(false);
         }
     };
 
     return (
         <div className="relative min-h-screen bg-gradient-to-br from-gray-50 to-indigo-100 py-8">
-            {/* Create Button */}
             <button
-                className="fixed right-6 top-20 px-8 py-3 bg-indigo-600 text-white font-semibold rounded-full shadow-lg hover:bg-indigo-700 transition transform hover:scale-105 z-50"
+                className={`fixed right-6 top-20 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-full shadow-lg transition transform z-50
+    ${isCreating ? "opacity-75 cursor-not-allowed" : "hover:bg-indigo-700 hover:scale-105"}`}
                 onClick={handleCreateTest}
+                disabled={isCreating}
+                type="button"
             >
-                Create
+                {isCreating ? (
+                    <span className="flex items-center gap-2">
+                        {/* simple accessible spinner */}
+                        <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" opacity="0.25"></circle>
+                            <path d="M22 12a10 10 0 00-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round"></path>
+                        </svg>
+                        Creating…
+                    </span>
+                ) : (
+                    "Create"
+                )}
             </button>
+
 
             <div className="max-w-4xl mx-auto px-4">
                 {/* Title */}
@@ -343,28 +497,49 @@ function CreateTest() {
                     <h2 className="text-2xl font-bold text-indigo-900 border-b border-indigo-200 pb-3 mb-6">
                         Information
                     </h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 ">
                         {[
                             { id: "title", placeholder: "Title", type: "text" },
                             { id: "duration", placeholder: "Duration (minutes)", type: "number" },
                             { id: "startDate", placeholder: "Start Date", type: "date" },
                             { id: "startTime", placeholder: "Start Time", type: "time" },
-                            { id: "targetAudience", placeholder: "Target Audience", type: "text" },
-                            { id: "author", placeholder: "Author", type: "text" },
+                            { id: "targetAudience", placeholder: "Target Audience (comma separated)", type: "text" },
+                            // author removed from inputs (taken from localStorage)
                             { id: "passMarks", placeholder: "Pass Marks (optional)", type: "number" },
                             { id: "totalMarks", placeholder: "Total Marks", type: "number" },
                         ].map((field) => (
-                            <input
-                                key={field.id}
-                                type={field.type}
-                                placeholder={field.placeholder}
-                                value={quiz[field.id]}
-                                onChange={(e) => handleQuizChange(field.id, e.target.value)}
-                                className={`p-3 rounded-lg border ${quizErrors[field.id] ? "border-red-400" : "border-gray-300"
-                                    } bg-gray-50 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition`}
-                            />
+                            <div key={field.id} className="flex flex-col justify-between space-y-1">
+                                <input
+                                    list={field.id === "targetAudience" ? "audience-list" : undefined}
+                                    id={field.id}
+                                    type={field.type}
+                                    placeholder={field.placeholder}
+                                    value={quiz[field.id]}
+                                    onChange={(e) => handleQuizChange(field.id, e.target.value)}
+                                    className={`p-3 rounded-lg border ${quizErrors[field.id] ? "border-red-400" : "border-gray-300"
+                                        } bg-gray-50 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition w-full`}
+                                />
+
+                                {/* Spacing for accessibility messages */}
+                                {field.id === "startDate" && quizErrors.startDate && (
+                                    <div className="text-sm text-red-500 mt-1">
+                                        {typeof quizErrors.startDate === 'string' ? quizErrors.startDate : 'Please choose today or a future date.'}
+                                    </div>
+                                )}
+
+                                {field.id === "passMarks" && quizErrors.passMarks && (
+                                    <div className="text-sm text-red-500 mt-1">{quizErrors.passMarks}</div>
+                                )}
+                            </div>
                         ))}
                     </div>
+
+                    {/* light datalist for audience suggestions (no heavy UI additions) */}
+                    <datalist id="audience-list">
+                        {audienceSuggestions.map((s) => (
+                            <option key={s} value={s} />
+                        ))}
+                    </datalist>
                 </section>
 
                 {/* Actions Bar */}
@@ -471,8 +646,8 @@ function CreateTest() {
                                         type="text"
                                         required
                                         className={`flex-1 p-3 rounded-lg border ${errors[globalIdx]?.options && errors[globalIdx].options[oi]
-                                                ? "border-red-400"
-                                                : "border-gray-300"
+                                            ? "border-red-400"
+                                            : "border-gray-300"
                                             } bg-gray-50 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition`}
                                         placeholder={`Option ${oi + 1}`}
                                         value={opt}

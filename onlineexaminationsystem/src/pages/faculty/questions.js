@@ -259,7 +259,7 @@ function Questions() {
           return;
         }
 
-        setImportStatus(`Saved ${importedQuestions.length} questions to DB.`);
+        setImportStatus(`Import ${importedQuestions.length} questions.`);
         setTimeout(() => setImportStatus(null), 3000);
       } catch (err) {
         setImportStatus(`Import parsed but failed to save: ${err.message}`);

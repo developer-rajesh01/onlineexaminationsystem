@@ -4,8 +4,8 @@ import axios from "axios";
 import image from "../assets/login.jpg";
 
 const institutes = [
-  "Institute A",
-  "Institute B",
+  "poornima university",
+  "poornima Institute ",
   "Institute C",
   "Institute of Technology",
   "Institute of Science",
@@ -49,57 +49,49 @@ function Register() {
     setShowSuggestions(false);
   };
 
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-    const userId = formData.institute + formData.email;
-
-    const payload = {
-      _id: userId,
-      name: formData.name,
-      email: formData.email,
-      password: formData.password,
-      role: formData.role,
-      institute: formData.institute,
-    };
+    if (isSubmitting) return;
+    setIsSubmitting(true);
 
     try {
-      const res = await axios.post(
-        "http://localhost:5000/api/auth/register",
-        payload
-      );
+      const payload = {
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        role: formData.role,
+        institute: formData.institute,
+      };
+
+      const res = await axios.post("http://localhost:5000/api/auth/register", payload);
       alert(res.data.message || "Registration Successful!");
       navigate("/login");
     } catch (error) {
       alert(error.response?.data?.message || "Registration failed");
+    } finally {
+      setIsSubmitting(false);
     }
   };
+
+
 
   return (
     <div className="min-h-screen flex items-center justify-center px-2">
       <div
-        className="
-          w-full max-w-4xl
-          bg-gradient-to-br from-white via-blue-50 to-blue-100
-          rounded-3xl shadow-2xl border-2 border-blue-200
-          flex flex-col md:flex-row overflow-hidden
-          transform scale-105
-        "
+        className="w-full max-w-4xl bg-gradient-to-br from-white via-blue-50 to-blue-100 rounded-3xl shadow-2xl border-2 border-blue-200 flex flex-col md:flex-row overflow-hidden transform scale-105"
         style={{ willChange: "transform" }}
       >
         <div className="md:w-1/2 w-full p-10 flex flex-col justify-center bg-gradient-to-br from-blue-50 to-gray-100">
-          <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">
-            Create an account
-          </h2>
+          <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Create an account</h2>
 
           <form onSubmit={handleSubmit}>
             <input
               type="text"
               name="name"
               value={formData.name}
-              onChange={(e) =>
-                setFormData({ ...formData, name: e.target.value })
-              }
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               placeholder="Full name"
               className="w-full px-4 py-3 mb-4 rounded-xl bg-white border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
               required
@@ -108,9 +100,7 @@ function Register() {
               type="email"
               name="email"
               value={formData.email}
-              onChange={(e) =>
-                setFormData({ ...formData, email: e.target.value })
-              }
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               placeholder="Email address"
               className="w-full px-4 py-3 mb-4 rounded-xl bg-white border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
               required
@@ -118,9 +108,7 @@ function Register() {
             <select
               name="role"
               value={formData.role}
-              onChange={(e) =>
-                setFormData({ ...formData, role: e.target.value })
-              }
+              onChange={(e) => setFormData({ ...formData, role: e.target.value })}
               className="w-full px-4 py-3 mb-4 rounded-xl bg-white border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
               required
             >
@@ -163,9 +151,7 @@ function Register() {
                 type={showPassword ? "text" : "password"}
                 name="password"
                 value={formData.password}
-                onChange={(e) =>
-                  setFormData({ ...formData, password: e.target.value })
-                }
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 placeholder="Password"
                 className="w-full px-4 py-3 rounded-xl bg-white border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
                 required
@@ -198,9 +184,7 @@ function Register() {
 
         <div
           className="md:w-1/2 w-full relative flex flex-col justify-center items-center bg-center bg-cover"
-          style={{
-            backgroundImage: `url(${image})`,
-          }}
+          style={{ backgroundImage: `url(${image})` }}
         ></div>
       </div>
     </div>

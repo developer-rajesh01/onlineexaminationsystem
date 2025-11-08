@@ -8,240 +8,273 @@ import {
     HiOutlineQuestionMarkCircle,
     HiOutlineClipboardList,
     HiOutlineUserCircle,
-    HiLogout,
-    HiOutlineHome,
     HiOutlineLogout,
-    HiOutlineChartBar
+    HiOutlineHome,
+    HiOutlineChartBar,
+    HiOutlineCog,
 } from "react-icons/hi";
 
-
-// Faculty Sidebar component
+// === Faculty Sidebar ===
 function FacultySidebar({ selectedSection, onSelect }) {
     const navigate = useNavigate();
+    const userName = localStorage.getItem("name") || "Faculty";
+    const userEmail = localStorage.getItem("email") || "";
 
-    const userName = localStorage.getItem("name") || "Guest";
-    const handleLogout = () => {
-        localStorage.removeItem("role");
-        localStorage.removeItem("email");
-        localStorage.removeItem("name");
-        navigate("/login", { replace: true });
-    };
- 
-
-    const items = [
-        {
-            label: "Dashboard",
-            to: "/dashboard",
-            icon: <HiOutlineViewGrid size={20} className="mr-3 group-hover:scale-110 transition-transform" />
-        },
-        {
-            label: "Create Test",
-            to: "/createTest",
-            icon: <HiOutlineClipboardList size={20} className="mr-3 group-hover:scale-125 transition-transform" />
-        },
-        {
-            label: "Questions",
-            to: "/questions",
-            icon: <HiOutlineQuestionMarkCircle size={20} className="mr-3 group-hover:scale-110 transition-transform" />
-        },
-        {
-            label: "Scoreboard",
-            to: "/scoreboard",
-            icon: <HiOutlineClipboardList size={20} className="mr-3 group-hover:scale-110 transition-transform" />
-        },
+    const menuItems = [
+        { label: "Dashboard", to: "/dashboard", icon: HiOutlineViewGrid },
+        { label: "Create Test", to: "/createTest", icon: HiOutlineClipboardList },
+        { label: "Questions", to: "/questions", icon: HiOutlineQuestionMarkCircle },
+        { label: "Scoreboard", to: "/scoreboard", icon: HiOutlineChartBar },
     ];
 
     return (
-        <aside className="w-76  bg-indigo-900 p-5 min-h-screen flex flex-col">
-            <div>
-                <h2 className="font-bold text-xl mb-2 text-gray-100">{userName}</h2>
-                <hr className="border-blue-300 mb-4" />
+        <aside className="w-72 bg-gradient-to-b from-indigo-900 via-indigo-800 to-indigo-900 text-white flex flex-col h-full shadow-2xl">
+            {/* User Info */}
+            <div className="p-6 border-b border-indigo-700">
+                <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-gradient-to-br from-teal-400 to-cyan-500 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-lg">
+                        {userName.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-lg">{userName}</h3>
+                        <p className="text-xs text-indigo-200">{userEmail}</p>
+                    </div>
+                </div>
             </div>
-            <nav className="flex-1">
-                <ul className="flex flex-col gap-2">
-                    {items.map(item => (
-                        <li key={item.label}>
-                            <NavLink
-                                to={item.to}
-                                className={({ isActive }) =>
-                                    `flex items-center rounded-lg px-3 py-2 transition-all duration-200 group ${selectedSection === item.label || isActive
-                                        ? "bg-teal-400 text-white shadow-md"
-                                        : "text-gray-100 hover:bg-blue-400 hover:text-white hover:shadow-lg transform hover:scale-105"
-                                    }`
-                                }
-                                onClick={() => { if (onSelect) onSelect(item.label); }}
-                            >
-                                {item.icon}
-                                <span className="text-base">{item.label}</span>
-                            </NavLink>
-                        </li>
-                    ))}
+
+            {/* Navigation */}
+            <nav className="flex-1 p-4">
+                <ul className="space-y-2">
+                    {menuItems.map((item) => {
+                        const Icon = item.icon;
+                        const isActive = selectedSection === item.label;
+
+                        return (
+                            <li key={item.label}>
+                                <button
+                                    onClick={() => {
+                                        navigate(item.to, { replace: true });
+                                        onSelect(item.label);
+                                    }}
+                                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all duration-300 group
+                    ${isActive
+                                            ? "bg-teal-500 text-white shadow-lg scale-105"
+                                            : "text-indigo-100 hover:bg-white/10 hover:text-white hover:shadow-md hover:scale-105"
+                                        }`}
+                                >
+                                    <Icon
+                                        size={22}
+                                        className={`transition-transform duration-300 ${isActive ? "scale-110" : "group-hover:scale-125"
+                                            }`}
+                                    />
+                                    <span className="font-medium">{item.label}</span>
+                                </button>
+                            </li>
+                        );
+                    })}
                 </ul>
             </nav>
-          
+
+            {/* Footer Badge */}
+            <div className="p-4 border-t border-indigo-700">
+                <div className="bg-gradient-to-r from-teal-500 to-cyan-500 text-white text-xs font-bold py-2 px-4 rounded-full text-center shadow-md">
+                    Faculty Portal
+                </div>
+            </div>
         </aside>
     );
 }
 
-// StudentHeader, AuthHeader and Layout remain similar; main faculty logic updated:
+// === Student Header ===
 function StudentHeader() {
     const navigate = useNavigate();
 
     const handleLogout = () => {
-        localStorage.removeItem("role");
-        localStorage.removeItem("email");
-        localStorage.removeItem("name");
+        localStorage.clear();
         navigate("/login", { replace: true });
     };
+
     return (
-        <header className="bg-indigo-600 shadow-md p-4 flex justify-between items-center text-white">
-            {/* Logo */}
-            <div className="flex items-center space-x-2">
-                <div className="font-bold text-2xl">YourLogo</div>
+        <header className="bg-gradient-to-r from-indigo-600 to-purple-600 shadow-lg text-white">
+            <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+                <Link to="/" className="flex items-center space-x-2">
+                    <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center">
+                        <span className="text-indigo-600 font-bold text-xl">L</span>
+                    </div>
+                    <span className="text-2xl font-bold">ExamPortal</span>
+                </Link>
+
+                <nav>
+                    <ul className="flex items-center gap-8 text-sm font-medium">
+                        <li>
+                            <NavLink
+                                to="/student/dashboard"
+                                className={({ isActive }) =>
+                                    `flex items-center gap-2 transition-all ${isActive ? "text-yellow-300" : "hover:text-yellow-200"}`
+                                }
+                            >
+                                <HiOutlineHome size={20} /> Dashboard
+                            </NavLink>
+                        </li>
+                        <li>
+                            <NavLink
+                                to="/student/scoreboard"
+                                className={({ isActive }) =>
+                                    `flex items-center gap-2 transition-all ${isActive ? "text-yellow-300" : "hover:text-yellow-200"}`
+                                }
+                            >
+                                <HiOutlineChartBar size={20} /> Scoreboard
+                            </NavLink>
+                        </li>
+                        <li>
+                            <NavLink
+                                to="/student/profile"
+                                className={({ isActive }) =>
+                                    `flex items-center gap-2 transition-all ${isActive ? "text-yellow-300" : "hover:text-yellow-200"}`
+                                }
+                            >
+                                <HiOutlineUserCircle size={20} /> Profile
+                            </NavLink>
+                        </li>
+                        <li>
+                            <button
+                                onClick={handleLogout}
+                                className="flex items-center gap-2 hover:text-red-300 transition-all"
+                            >
+                                <HiOutlineLogout size={20} /> Logout
+                            </button>
+                        </li>
+                    </ul>
+                </nav>
             </div>
-            <nav>
-                <ul className="flex gap-8 items-center">
-                    <li>
-                        <Link to="/student/dashboard" className="flex items-center hover:text-indigo-200 transition duration-200">
-                            <HiOutlineHome className="mr-1" size={20} /> Dashboard
-                        </Link>
-                    </li>
-                    <li>
-                        <Link to="/student/scoreboard" className="flex items-center hover:text-indigo-200 transition duration-200">
-                            <HiOutlineChartBar className="mr-1" size={20} /> Scoreboard
-                        </Link>
-                    </li>
-                    <li>
-                        <Link to="/student/profile" className="flex items-center hover:text-indigo-200 transition duration-200">
-                            <HiOutlineUserCircle className="mr-1" size={20} /> Profile
-                        </Link>
-                    </li>
-                    <li>
-                        <button onClick={handleLogout} className="flex items-center hover:text-red-400 transition duration-200">
-                            <HiOutlineLogout className="mr-1" size={20} /> Logout
-                        </button>
-                    </li>
-                </ul>
-            </nav>
         </header>
     );
 }
 
+// === Auth Header (Login/Register) ===
 function AuthHeader() {
     return (
-        <header className="bg-white shadow p-4 flex justify-between mb-10 items-center">
-            <Navbar />
+        <header className="bg-white shadow-sm border-b">
+            <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+                <Link to="/" className="flex items-center space-x-2">
+                    <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold">
+                        L
+                    </div>
+                    <span className="text-2xl font-bold text-gray-800">ExamPortal</span>
+                </Link>
+                <Navbar />
+            </div>
         </header>
     );
 }
 
-// MAIN LAYOUT - sidebar sets and manages selectedSection
+// === MAIN LAYOUT ===
 function Layout() {
     const [role, setRole] = useState("");
     const [selectedSection, setSelectedSection] = useState("Dashboard");
     const location = useLocation();
     const navigate = useNavigate();
 
-
     useEffect(() => {
         const userRole = localStorage.getItem("role");
         setRole(userRole || "");
+
+        // Auto-set section based on path
+        const path = location.pathname;
+        if (path.includes("dashboard")) setSelectedSection("Dashboard");
+        else if (path.includes("createTest")) setSelectedSection("Create Test");
+        else if (path.includes("questions")) setSelectedSection("Questions");
+        else if (path.includes("scoreboard")) setSelectedSection("Scoreboard");
     }, [location.pathname]);
 
-    const isAuthPage = location.pathname === "/login" || location.pathname === "/register";
+    const isAuthPage = ["/login", "/register"].includes(location.pathname);
 
-    if (isAuthPage) {
+    // === Guest / Unknown Role ===
+    if (!role || isAuthPage) {
         return (
             <>
                 <AuthHeader />
-                <main className="p-10">
-                    <Outlet />
+                <main className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+                    <div className="max-w-7xl mx-auto p-6">
+                        <Outlet />
+                    </div>
                 </main>
                 <Footer />
             </>
         );
     }
 
+    // === Faculty Layout ===
     if (role === "faculty") {
-
-        
         const handleLogout = () => {
-            localStorage.removeItem("role");
-            localStorage.removeItem("email");
-            localStorage.removeItem("name");
+            localStorage.clear();
             navigate("/login", { replace: true });
         };
 
         return (
-            <div className="flex h-screen overflow-hidden">
-                {/* Sidebar with its own scroll -- notice selectedSection/handler passed */}
-                <aside className="w-56 bg-indigo-900 p-0 flex-shrink-0 h-full overflow-y-auto">
-                    <div className="h-full">
-                        <FacultySidebar selectedSection={selectedSection} onSelect={setSelectedSection} />
-                    </div>
-                </aside>
-                {/* Main content */}
-                <main className="flex-1 flex flex-col bg-gray-50 h-full overflow-y-auto">
-                    {/* Sticky Header */}
-                    <div className="sticky top-0 z-10 flex justify-between items-center h-16 pl-10 pr-10 bg-white border-b shadow-sm">
-                        {/* Dynamically show current section */}
-                        <span className="text-lg font-semibold text-gray-700">{selectedSection}</span>
-                        <div className="flex items-center gap-4">
-                            <div className="px-3 py-1 bg-sky-100 rounded text-sky-800 text-sm"></div>
+            <div className="flex h-screen bg-gray-100 overflow-hidden">
+                {/* Sidebar */}
+                <FacultySidebar selectedSection={selectedSection} onSelect={setSelectedSection} />
+
+                {/* Main Content */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                    {/* Top Bar */}
+                    <header className="bg-white shadow-sm border-b border-gray-200 z-10">
+                        <div className="px-6 py-4 flex justify-between items-center">
+                            <div>
+                                <h1 className="text-2xl font-bold text-gray-800">{selectedSection}</h1>
+                                <p className="text-sm text-gray-500 mt-1">Manage your assessments efficiently</p>
+                            </div>
+
+                            <div className="flex items-center gap-4">
+                                {/* Profile Link */}
                                 <NavLink
                                     to="/profile"
-                                    className={({ isActive }) =>
-                                        `flex items-center rounded-lg px-4 py-2 transition-all duration-200 group ${isActive
-                                            ? "bg-teal-400 text-white shadow-md"
-                                            : "text-gray-100 hover:bg-blue-400 hover:text-white hover:shadow-lg transform hover:scale-105"
-                                        }`
-                                    }
+                                    className="flex items-center gap-3 px-4 py-2 bg-gradient-to-r from-teal-500 to-cyan-500 text-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 hover:scale-105"
                                 >
-                                    <HiOutlineUserCircle size={30} className="mr-3 group-hover:scale-110 transition-transform" />
-                                    <span className="text-base">Profile</span>
+                                    <HiOutlineUserCircle size={22} />
+                                    <span className="font-medium">Profile</span>
                                 </NavLink>
-                            <button
-                                onClick={handleLogout}
-                                className="text-blue-700 hover:underline text-sm" >
-                                Sign Out
-                            </button>
-                            
-                               
+
+                                {/* Logout */}
+                                <button
+                                    onClick={handleLogout}
+                                    className="flex items-center gap-2 px-4 py-2 text-red-600 bg-red-50 rounded-xl hover:bg-red-100 transition-all duration-200"
+                                >
+                                    <HiOutlineLogout size={20} />
+                                    <span className="font-medium">Sign Out</span>
+                                </button>
+                            </div>
                         </div>
-                    </div>
+                    </header>
+
                     {/* Page Content */}
-                    <div className="flex-1 p-8 overflow-y-auto">
-                        <Outlet />
-                    </div>
-                </main>
+                    <main className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+                        <div className="max-w-7xl mx-auto">
+                            <Outlet />
+                        </div>
+                    </main>
+                </div>
             </div>
         );
     }
 
+    // === Student Layout ===
     if (role === "student") {
         return (
             <>
                 <StudentHeader />
-                <main className="p-10">
-                    <Outlet />
+                <main className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-6">
+                    <div className="max-w-7xl mx-auto">
+                        <Outlet />
+                    </div>
                 </main>
             </>
         );
     }
 
-    // Fallback for guests or unknown roles:
-    return (
-        <>
-            <header className="bg-white shadow p-4 flex justify-between items-center">
-                <div className="font-bold text-xl">YourLogo</div>
-                <Navbar />
-            </header>
-            <main className="p-10">
-                <Outlet />
-            </main>
-            <Footer />
-        </>
-    );
+    // === Fallback ===
+    return null;
 }
 
 export default Layout;

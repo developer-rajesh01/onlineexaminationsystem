@@ -26,7 +26,7 @@ function LoginPage() {
         localStorage.setItem("role", res.data.user.role);
         localStorage.setItem("name", res.data.user.name);
         localStorage.setItem("email", res.data.user.email);
-
+        localStorage.setItem("institute", res.data.user.institute); 
         setMessage("✅ Login successful! Redirecting...");
         setLoading(false);
 

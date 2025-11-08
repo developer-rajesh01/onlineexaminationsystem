@@ -3,7 +3,7 @@ import Test from "../models/Test.js";
 
 const router = express.Router();
 
-// Create a new test
+// Create new test
 router.post("/", async (req, res) => {
     try {
         const test = new Test(req.body);
@@ -13,18 +13,22 @@ router.post("/", async (req, res) => {
         res.status(400).json({ message: error.message });
     }
 });
-
-// Get all tests
 router.get("/", async (req, res) => {
     try {
-        const tests = await Test.find();
+        const { email, status } = req.query;
+        const filter = {};
+        if (email) filter.facultyEmail = email;  // match your schema field name for email
+        if (status) filter.status = status;      // status = 'Active' or 'Completed'
+        const tests = await Test.find(filter);
         res.json(tests);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
 });
 
-// Get a single test by id
+
+
+// Get test by id
 router.get("/:id", async (req, res) => {
     try {
         const test = await Test.findById(req.params.id);
@@ -35,7 +39,7 @@ router.get("/:id", async (req, res) => {
     }
 });
 
-// Update a test by id
+// Update test by id
 router.put("/:id", async (req, res) => {
     try {
         const test = await Test.findByIdAndUpdate(req.params.id, req.body, {
@@ -49,7 +53,7 @@ router.put("/:id", async (req, res) => {
     }
 });
 
-// Delete a test by id
+// Delete test by id
 router.delete("/:id", async (req, res) => {
     try {
         const test = await Test.findByIdAndDelete(req.params.id);

@@ -16,10 +16,16 @@ const testSchema = new mongoose.Schema(
         author: { type: String, required: true },
         passMarks: { type: Number },
         totalMarks: { type: Number, required: true },
+        institute: { type: String, required: true },
         questions: [questionSchema],
+        facultyEmail: { type: String, required: true },
+        status: { type: String, enum: ['Active', 'Completed'], default: 'Active' } // Add status field here
     },
-    { timestamps: true }
+    {
+        timestamps: true,
+    }
 );
+
 
 const Test = mongoose.model("Test", testSchema);
 

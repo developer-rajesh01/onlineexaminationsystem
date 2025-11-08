@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Layout from "./component/Layout";
 import HomeRedirect from "./component/HomeRedirect";
 import ProtectedRoute from "./component/ProtectedRoute";
+import GuestRoute from "./component/GuestRoute"; // You need to create this for unauth routes
 
 import LoginPage from "./pages/login";
 import RegisterPage from "./pages/register";
@@ -23,84 +24,58 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<Layout />}>
-          <Route path="/" element={<HomeRedirect />} />  {/* Root redirect */}
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          {/* Home (could redirect depending on auth) */}
+          <Route path="/" element={<HomeRedirect />} />
 
-          {/* Faculty routes protected */}
-          
-          <Route path="/">
-            <Route
-              path="dashboard"
-              element={
-                <ProtectedRoute roleRequired="faculty">
-                  <FacultyDashboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="questions"
-              element={
-                <ProtectedRoute roleRequired="faculty">
-                  <Questions/>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="scoreboard"
-              element={
-                <ProtectedRoute roleRequired="faculty">
-                  <Scoreboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="profile"
-              element={
-                <ProtectedRoute roleRequired="faculty">
-                  <Profile />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="createTest"
-              element={
-                <ProtectedRoute roleRequired="faculty">
-                  <CreateTest />
-                </ProtectedRoute>
-              }
-            />
-          </Route>
+          {/* Login/Register only accessible if not logged in */}
+          <Route path="/login" element={<GuestRoute><LoginPage /></GuestRoute>} />
+          <Route path="/register" element={<GuestRoute><RegisterPage /></GuestRoute>} />
 
-          {/* Student routes protected */}
-          <Route path="/student">
-            <Route
-              path="dashboard"
-              element={
-                <ProtectedRoute roleRequired="student">
-                  <StudentDashboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="profile"
-              element={
-                <ProtectedRoute roleRequired="student">
-                  <StudentProfile />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="scoreboard"
-              element={
-                <ProtectedRoute roleRequired="student">
-                  <StudentScoreboard />
-                </ProtectedRoute>
-              }
-            />
-          </Route>
+          {/* Faculty routes (nested under /) */}
+          <Route path="dashboard" element={
+            <ProtectedRoute roleRequired="faculty">
+              <FacultyDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="questions" element={
+            <ProtectedRoute roleRequired="faculty">
+              <Questions />
+            </ProtectedRoute>
+          } />
+          <Route path="scoreboard" element={
+            <ProtectedRoute roleRequired="faculty">
+              <Scoreboard />
+            </ProtectedRoute>
+          } />
+          <Route path="profile" element={
+            <ProtectedRoute roleRequired="faculty">
+              <Profile />
+            </ProtectedRoute>
+          } />
+          <Route path="createTest" element={
+            <ProtectedRoute roleRequired="faculty">
+              <CreateTest />
+            </ProtectedRoute>
+          } />
 
-          {/* Optionally 404 */}
+          {/* Student routes (nested under /student) */}
+          <Route path="student/dashboard" element={
+            <ProtectedRoute roleRequired="student">
+              <StudentDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="student/profile" element={
+            <ProtectedRoute roleRequired="student">
+              <StudentProfile />
+            </ProtectedRoute>
+          } />
+          <Route path="student/scoreboard" element={
+            <ProtectedRoute roleRequired="student">
+              <StudentScoreboard />
+            </ProtectedRoute>
+          } />
+
+          {/* Optionally add 404 */}
           {/* <Route path="*" element={<NotFound />} /> */}
         </Route>
       </Routes>
