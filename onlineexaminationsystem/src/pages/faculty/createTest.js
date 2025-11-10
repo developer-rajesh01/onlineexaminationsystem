@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { FiUpload, FiTrash2, FiPlusCircle } from "react-icons/fi";
 import * as XLSX from "xlsx";
+import { useNavigate, useLocation, useParams } from "react-router-dom";
 
 const QUESTIONS_PER_PAGE = 10;
 
@@ -13,8 +14,49 @@ const saveQuestionsToDB = async (data) =>
         }, 1000)
     );
 
+function isoToLocalInputValue(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const mm = pad(d.getMonth() + 1);
+    const dd = pad(d.getDate());
+    const hh = pad(d.getHours());
+    const min = pad(d.getMinutes());
+    return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+function localInputValueToIso(localValue) {
+    if (!localValue) return "";
+    const d = new Date(localValue);
+    if (isNaN(d.getTime())) return "";
+    return d.toISOString();
+}
+
 function CreateTest() {
+    const navigate = useNavigate();
+    const location = useLocation();
+    const { id } = useParams();
+
+    // detect if editing (so we skip localStorage for edit mode)
+    const isEditMode = Boolean(id || location?.state?.task);
+
+    // use localStorage only if NOT editing
     const [quiz, setQuiz] = useState(() => {
+        if (isEditMode) {
+            return {
+                title: "",
+                duration: "",
+                startDate: "",
+                startTime: "",
+                targetAudience: "",
+                author: "",
+                passMarks: "",
+                totalMarks: "",
+                institute: "",
+            };
+        }
         const savedQuiz = localStorage.getItem("quizData");
         return savedQuiz
             ? JSON.parse(savedQuiz)
@@ -27,21 +69,30 @@ function CreateTest() {
                 author: "",
                 passMarks: "",
                 totalMarks: "",
+                institute: "",
             };
     });
 
+    const [startTimestampInput, setStartTimestampInput] = useState(""); // datetime-local value (for startTimestamp)
     const [institute, setInstitute] = useState("");
 
     // Load institute & author from localStorage
     useEffect(() => {
         const inst = localStorage.getItem("institute") || "";
         const authorFromStorage =
-            localStorage.getItem("author") || localStorage.getItem("name") || localStorage.getItem("email") || "";
+            localStorage.getItem("author") ||
+            localStorage.getItem("name") ||
+            localStorage.getItem("email") ||
+            "";
         setQuiz((prev) => ({ ...prev, institute: inst, author: authorFromStorage }));
         setInstitute(inst);
     }, []);
 
+    // questions initial state: use localStorage only when NOT editing
     const [questions, setQuestions] = useState(() => {
+        if (isEditMode) {
+            return [{ questionText: "", options: ["", ""], correctIdx: 0 }];
+        }
         const savedQuestions = localStorage.getItem("questionsData");
         return savedQuestions
             ? JSON.parse(savedQuestions)
@@ -82,7 +133,179 @@ function CreateTest() {
         localStorage.setItem("questionsData", JSON.stringify(questions));
     }, [questions]);
 
-    // Validation helpers
+    // If editing: prefill from location.state.task OR fetch by id
+    useEffect(() => {
+        const incoming = location?.state?.task;
+        if (incoming) {
+            // Map incoming structure into our form shape
+            setQuiz((prev) => ({
+                ...prev,
+                title: incoming.title ?? prev.title,
+                duration: incoming.duration ? String(incoming.duration) : prev.duration,
+                targetAudience: incoming.targetAudience ?? prev.targetAudience,
+                author: incoming.author ?? prev.author,
+                passMarks:
+                    incoming.passMarks !== undefined && incoming.passMarks !== null
+                        ? String(incoming.passMarks)
+                        : prev.passMarks,
+                totalMarks:
+                    incoming.totalMarks !== undefined && incoming.totalMarks !== null
+                        ? String(incoming.totalMarks)
+                        : prev.totalMarks,
+                institute: incoming.institute ?? prev.institute,
+                startDate: incoming.startDate ?? prev.startDate,
+                startTime: incoming.startTime ?? prev.startTime,
+            }));
+
+            // prefer startTimestamp
+            if (incoming.startTimestamp) {
+                setStartTimestampInput(isoToLocalInputValue(incoming.startTimestamp));
+            } else if (incoming.startDate && incoming.startTime) {
+                // optional: combine date + time into datetime-local if both present
+                try {
+                    const combined = new Date(`${incoming.startDate}T${incoming.startTime}`);
+                    if (!isNaN(combined.getTime())) {
+                        setStartTimestampInput(isoToLocalInputValue(combined.toISOString()));
+                    }
+                } catch {
+                    // ignore
+                }
+            }
+
+            // questions: try to copy incoming.questions if present
+            if (Array.isArray(incoming.questions) && incoming.questions.length) {
+                // ensure each question has options array and correctIdx
+                const mapped = incoming.questions.map((q) => ({
+                    questionText: q.questionText ?? q.text ?? "",
+                    options: Array.isArray(q.options)
+                        ? q.options
+                        : [
+                            q.option1 ?? "",
+                            q.option2 ?? "",
+                            q.option3 ?? "",
+                            q.option4 ?? "",
+                        ].filter(() => true), // keep blanks as-is
+                    correctIdx:
+                        typeof q.correctIdx === "number"
+                            ? q.correctIdx
+                            : q.correctOptionIndex ?? 0,
+                }));
+                setQuestions(mapped.length ? mapped : [{ questionText: "", options: ["", ""], correctIdx: 0 }]);
+            }
+            return;
+        }
+
+        // If no incoming state but :id present, fetch from API
+        let cancelled = false;
+        if (id) {
+            (async () => {
+                try {
+                    const res = await fetch(`http://localhost:5000/api/tests/${id}`, { credentials: "include" });
+                    if (!res.ok) {
+                        const txt = await res.text().catch(() => "");
+                        throw new Error(`${res.status} ${txt}`);
+                    }
+                    const data = await res.json();
+                    if (cancelled) return;
+                    const t = data?.data || data || {};
+                    setQuiz((prev) => ({
+                        ...prev,
+                        title: t.title ?? prev.title,
+                        duration: t.duration ? String(t.duration) : prev.duration,
+                        targetAudience: t.targetAudience ?? prev.targetAudience,
+                        author: t.author ?? prev.author,
+                        passMarks:
+                            t.passMarks !== undefined && t.passMarks !== null ? String(t.passMarks) : prev.passMarks,
+                        totalMarks:
+                            t.totalMarks !== undefined && t.totalMarks !== null ? String(t.totalMarks) : prev.totalMarks,
+                        institute: t.institute ?? prev.institute,
+                        startDate: t.startDate ?? prev.startDate,
+                        startTime: t.startTime ?? prev.startTime,
+                    }));
+                    if (t.startTimestamp) {
+                        setStartTimestampInput(isoToLocalInputValue(t.startTimestamp));
+                    } else if (t.startDate && t.startTime) {
+                        try {
+                            const combined = new Date(`${t.startDate}T${t.startTime}`);
+                            if (!isNaN(combined.getTime())) {
+                                setStartTimestampInput(isoToLocalInputValue(combined.toISOString()));
+                            }
+                        } catch { }
+                    }
+                    if (Array.isArray(t.questions) && t.questions.length) {
+                        const mapped = t.questions.map((q) => ({
+                            questionText: q.questionText ?? q.text ?? "",
+                            options: Array.isArray(q.options)
+                                ? q.options
+                                : [
+                                    q.option1 ?? "",
+                                    q.option2 ?? "",
+                                    q.option3 ?? "",
+                                    q.option4 ?? "",
+                                ],
+                            correctIdx:
+                                typeof q.correctIdx === "number"
+                                    ? q.correctIdx
+                                    : q.correctOptionIndex ?? 0,
+                        }));
+                        setQuestions(mapped.length ? mapped : [{ questionText: "", options: ["", ""], correctIdx: 0 }]);
+                    }
+                } catch (err) {
+                    console.error("Failed to load test for edit:", err);
+                }
+            })();
+        }
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location, id]);
+
+    // --- SYNC: when separate date+time inputs changed, set datetime-local (if user hasn't explicitly set it) ---
+    useEffect(() => {
+        // Only sync into datetime-local when user hasn't manually typed a datetime-local.
+        // This avoids overwriting a deliberate datetime-local choice.
+        if (startTimestampInput) return; // user already set datetime-local - don't override
+
+        const d = quiz.startDate;
+        const t = quiz.startTime;
+        if (!d || !t) return;
+
+        try {
+            // build a local datetime string "YYYY-MM-DDTHH:mm"
+            const combinedLocal = `${d}T${t}`; // e.g. "2025-11-08T17:42"
+            const dt = new Date(combinedLocal);
+            if (!isNaN(dt.getTime())) {
+                setStartTimestampInput(isoToLocalInputValue(dt.toISOString()));
+            }
+        } catch (e) {
+            // ignore invalid combos
+        }
+    }, [quiz.startDate, quiz.startTime, startTimestampInput]);
+
+    // --- SYNC: when datetime-local changed, update the separate date/time inputs so both are visible ---
+    useEffect(() => {
+        if (!startTimestampInput) return;
+        try {
+            // startTimestampInput is like "2025-11-08T22:12"
+            const d = new Date(startTimestampInput);
+            if (isNaN(d.getTime())) return;
+
+            const pad = (n) => String(n).padStart(2, "0");
+            const yyyy = d.getFullYear();
+            const mm = pad(d.getMonth() + 1);
+            const dd = pad(d.getDate());
+            const hh = pad(d.getHours());
+            const min = pad(d.getMinutes());
+
+            const dateStr = `${yyyy}-${mm}-${dd}`;
+            const timeStr = `${hh}:${min}`;
+
+            // set into quiz form state (so the visible date/time inputs show the composed values)
+            setQuiz((prev) => ({ ...prev, startDate: dateStr, startTime: timeStr }));
+        } catch (e) {
+            // ignore
+        }
+    }, [startTimestampInput]);
+
     const todayStr = () => new Date().toISOString().split("T")[0];
 
     const validateQuiz = () => {
@@ -90,24 +313,24 @@ function CreateTest() {
         const requiredFields = [
             "title",
             "duration",
-            "startDate",
-            "startTime",
+            // startDate & startTime are optional if startTimestamp provided
             "targetAudience",
-            // author removed from required fields because it's taken from localStorage automatically
             "totalMarks",
         ];
+
         requiredFields.forEach((field) => {
+            // If startTimestamp is set, don't require startDate/startTime individually
+            if ((field === "startDate" || field === "startTime") && startTimestampInput) return;
             if (!quiz[field] || !quiz[field].toString().trim()) {
                 newErrors[field] = true;
             }
         });
 
-        // startDate must be today or future
-        if (quiz.startDate && quiz.startDate < todayStr()) {
+        // startDate must be today or future (only if startTimestamp not used and startDate provided)
+        if (!startTimestampInput && quiz.startDate && quiz.startDate < todayStr()) {
             newErrors.startDate = "Date cannot be in the past";
         }
 
-        // passMarks must be less than totalMarks (if provided)
         if (
             quiz.passMarks !== "" &&
             quiz.passMarks !== undefined &&
@@ -135,11 +358,7 @@ function CreateTest() {
         let hasValidQuestion = false;
         questions.forEach((q, idx) => {
             const qErrors = validateQuestion(q);
-            if (
-                qErrors.questionText ||
-                qErrors.minOptions ||
-                qErrors.options.some((e) => e)
-            ) {
+            if (qErrors.questionText || qErrors.minOptions || qErrors.options.some((e) => e)) {
                 newErrors[idx] = qErrors;
             } else {
                 hasValidQuestion = true;
@@ -148,7 +367,6 @@ function CreateTest() {
         return { errors: newErrors, hasValidQuestion };
     };
 
-    // Handlers for quiz info changes
     const handleQuizChange = (field, val) => {
         // date cannot be in past -- immediate feedback
         if (field === "startDate") {
@@ -165,19 +383,15 @@ function CreateTest() {
             }
         }
 
-        // Target audience change -> update suggestions using datalist (simple UX)
         if (field === "targetAudience") {
-            // keep the full comma-separated value in the input
             setQuiz((prev) => ({ ...prev, [field]: val }));
 
-            // build suggestions based on the last token being typed
             const tokens = val.split(",").map((t) => t.trim()).filter(Boolean);
             const last = tokens.length ? tokens[tokens.length - 1] : "";
             const term = last.toLowerCase();
 
             const matches = [];
             if (!term) {
-                // show common courses + batches if empty (helps discoverability)
                 matches.push(...COURSES.concat(BATCHES));
             } else {
                 matches.push(
@@ -185,11 +399,8 @@ function CreateTest() {
                     ...BATCHES.filter((b) => b.toLowerCase().includes(term))
                 );
             }
-
-            // remove duplicates
             const uniq = Array.from(new Set(matches));
             setAudienceSuggestions(uniq.slice(0, 20));
-
             setQuizErrors((prev) => ({ ...prev, targetAudience: !val.trim() }));
             setValidationMessage("");
             return;
@@ -200,7 +411,6 @@ function CreateTest() {
         setValidationMessage("");
     };
 
-    // Handlers for question changes
     const handleQChange = (idx, val) => {
         const updated = [...questions];
         updated[idx].questionText = val;
@@ -257,14 +467,12 @@ function CreateTest() {
         });
     };
 
-    // Pagination logic
     const numPages = Math.ceil(questions.length / QUESTIONS_PER_PAGE);
     const pagedQuestions = questions.slice(
         currentPage * QUESTIONS_PER_PAGE,
         (currentPage + 1) * QUESTIONS_PER_PAGE
     );
 
-    // Clear all quiz and question data
     const clearAll = () => {
         setQuestions([{ questionText: "", options: ["", ""], correctIdx: 0 }]);
         setQuiz({
@@ -273,11 +481,16 @@ function CreateTest() {
             startDate: "",
             startTime: "",
             targetAudience: "",
-            author: localStorage.getItem("author") || localStorage.getItem("name") || localStorage.getItem("email") || "",
+            author:
+                localStorage.getItem("author") ||
+                localStorage.getItem("name") ||
+                localStorage.getItem("email") ||
+                "",
             passMarks: "",
             totalMarks: "",
             institute: "",
         });
+        setStartTimestampInput("");
         setCurrentPage(0);
         setErrors({});
         setQuizErrors({});
@@ -286,7 +499,7 @@ function CreateTest() {
         localStorage.removeItem("questionsData");
     };
 
-    // Import from Excel .xlsx or .xls file
+    // Import from Excel
     const handleImport = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -307,8 +520,7 @@ function CreateTest() {
                         String(row.Option4 ?? ""),
                     ].filter((opt) => opt !== "");
 
-                    let correctIdx = 0; // default
-
+                    let correctIdx = 0;
                     if (typeof row.CorrectAnswer === "string") {
                         const optionMap = { A: 0, B: 1, C: 2, D: 3 };
                         const answerKey = row.CorrectAnswer.toUpperCase().trim();
@@ -318,7 +530,7 @@ function CreateTest() {
 
                     return {
                         questionText: String(row.Question || ""),
-                        options: options,
+                        options: options.length ? options : ["", ""],
                         correctIdx: correctIdx,
                     };
                 })
@@ -334,9 +546,9 @@ function CreateTest() {
             setShowImportModal(true);
         };
         reader.readAsBinaryString(file);
+        e.target.value = null;
     };
 
-    // Confirm import and save imported questions
     const handleImportYes = async () => {
         await saveQuestionsToDB(importedQuestions); // Replace with real API call if needed
         setQuestions((prev) => [...prev, ...importedQuestions]);
@@ -353,7 +565,6 @@ function CreateTest() {
         setTimeout(() => setImportStatus(""), 2500);
     };
 
-    // Import but don't save
     const handleImportNo = () => {
         setQuestions((prev) => [...prev, ...importedQuestions]);
         setImportStatus(`${importedQuestions.length} questions imported (not saved to DB)!`);
@@ -369,19 +580,21 @@ function CreateTest() {
         setTimeout(() => setImportStatus(""), 2500);
     };
 
-    const [isCreating, setIsCreating] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
     const [facultyEmail, setFacultyEmail] = useState("");
     useEffect(() => {
         const email = localStorage.getItem("email");
         if (email) setFacultyEmail(email);
-        // ensure author kept in sync if it changes externally
-        const authorFromStorage = localStorage.getItem("author") || localStorage.getItem("name") || localStorage.getItem("email") || "";
+        const authorFromStorage =
+            localStorage.getItem("author") ||
+            localStorage.getItem("name") ||
+            localStorage.getItem("email") ||
+            "";
         setQuiz((prev) => ({ ...prev, author: authorFromStorage }));
     }, []);
 
-    // Submit quiz and questions to backend API
-    // Replace your handleCreateTest with this improved version
-    const handleCreateTest = async () => {
+    // Create or Save (update)
+    const handleCreateOrSave = async () => {
         const quizValidationErrors = validateQuiz();
         const { errors: questionErrors, hasValidQuestion } = validateQuestions();
 
@@ -402,14 +615,21 @@ function CreateTest() {
             return;
         }
 
-        // Prepare payload (flattened, numeric conversions)
+        // Build payload
         const payload = {
             title: quiz.title.trim(),
             duration: Number(quiz.duration),
-            startDate: quiz.startDate,
-            startTime: quiz.startTime,
+            // prefer startTimestamp if set
+            startTimestamp: startTimestampInput ? localInputValueToIso(startTimestampInput) : undefined,
+            startDate: !startTimestampInput ? quiz.startDate : undefined,
+            startTime: !startTimestampInput ? quiz.startTime : undefined,
             targetAudience: quiz.targetAudience.trim(),
-            author: quiz.author?.trim() || (localStorage.getItem("author") || localStorage.getItem("name") || localStorage.getItem("email") || ""),
+            author:
+                quiz.author?.trim() ||
+                localStorage.getItem("author") ||
+                localStorage.getItem("name") ||
+                localStorage.getItem("email") ||
+                "",
             passMarks: quiz.passMarks ? Number(quiz.passMarks) : undefined,
             totalMarks: Number(quiz.totalMarks),
             institute: quiz.institute?.trim() || "",
@@ -417,22 +637,33 @@ function CreateTest() {
             facultyEmail,
         };
 
-        // minimal cleanup
         Object.keys(payload).forEach((k) => {
             if (payload[k] === undefined) delete payload[k];
         });
 
-        console.log("Final payload:", payload);
-
-        setIsCreating(true);
+        setIsSaving(true);
         try {
-            const response = await fetch("http://localhost:5000/api/tests", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            });
+            let res;
+            if (id || location?.state?.task?._id) {
+                // update flow: prefer URL id then task._id
+                const targetId = id || location?.state?.task?._id;
+                res = await fetch(`http://localhost:5000/api/tests/${targetId}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify(payload),
+                });
+            } else {
+                // create
+                res = await fetch("http://localhost:5000/api/tests", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "include",
+                    body: JSON.stringify(payload),
+                });
+            }
 
-            const text = await response.text().catch(() => "");
+            const text = await res.text().catch(() => "");
             let data;
             try {
                 data = text ? JSON.parse(text) : null;
@@ -440,52 +671,55 @@ function CreateTest() {
                 data = { message: text || null };
             }
 
-            if (!response.ok) {
-                console.error("Create test failed:", response.status, data);
-                throw new Error(data?.message || `Server responded with ${response.status}`);
+            if (!res.ok) {
+                console.error("Save failed:", res.status, data);
+                throw new Error(data?.message || `Server responded with ${res.status}`);
             }
 
-            alert("Test created successfully!");
-            clearAll();
-        } catch (error) {
-            console.error("handleCreateTest error:", error);
-            alert(`Error creating test: ${error.message}`);
+            alert(id || location?.state?.task ? "Test saved successfully!" : "Test created successfully!");
+            // After save remove local draft so stale data won't rehydrate later
+            localStorage.removeItem("quizData");
+            localStorage.removeItem("questionsData");
+
+            // After save navigate back to dashboard (or wherever you want)
+            navigate("/", { replace: true });
+        } catch (err) {
+            console.error("handleCreateOrSave error:", err);
+            alert(`Error saving test: ${err.message}`);
         } finally {
-            setIsCreating(false);
+            setIsSaving(false);
         }
     };
+
+    const isEditing = Boolean(id || location?.state?.task);
 
     return (
         <div className="relative min-h-screen bg-gradient-to-br from-gray-50 to-indigo-100 py-8">
             <button
                 className={`fixed right-6 top-20 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-full shadow-lg transition transform z-50
-    ${isCreating ? "opacity-75 cursor-not-allowed" : "hover:bg-indigo-700 hover:scale-105"}`}
-                onClick={handleCreateTest}
-                disabled={isCreating}
+    ${isSaving ? "opacity-75 cursor-not-allowed" : "hover:bg-indigo-700 hover:scale-105"}`}
+                onClick={handleCreateOrSave}
+                disabled={isSaving}
                 type="button"
             >
-                {isCreating ? (
+                {isSaving ? (
                     <span className="flex items-center gap-2">
-                        {/* simple accessible spinner */}
                         <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                             <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" opacity="0.25"></circle>
                             <path d="M22 12a10 10 0 00-10-10" stroke="currentColor" strokeWidth="4" strokeLinecap="round"></path>
                         </svg>
-                        Creating…
+                        {isEditing ? "Saving…" : "Creating…"}
                     </span>
                 ) : (
-                    "Create"
+                    (isEditing ? "Save Changes" : "Create")
                 )}
             </button>
 
-
             <div className="max-w-4xl mx-auto px-4">
-                {/* Title */}
                 <h1 className="text-4xl font-extrabold text-center text-indigo-900 mb-8">
-                    {quiz.title.trim() ? quiz.title : "Create a New Test"}
+                    {quiz.title.trim() ? quiz.title : isEditing ? "Edit Test" : "Create a New Test"}
                 </h1>
 
-                {/* Validation Message */}
                 {validationMessage && (
                     <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg">
                         {validationMessage}
@@ -504,7 +738,6 @@ function CreateTest() {
                             { id: "startDate", placeholder: "Start Date", type: "date" },
                             { id: "startTime", placeholder: "Start Time", type: "time" },
                             { id: "targetAudience", placeholder: "Target Audience (comma separated)", type: "text" },
-                            // author removed from inputs (taken from localStorage)
                             { id: "passMarks", placeholder: "Pass Marks (optional)", type: "number" },
                             { id: "totalMarks", placeholder: "Total Marks", type: "number" },
                         ].map((field) => (
@@ -514,16 +747,15 @@ function CreateTest() {
                                     id={field.id}
                                     type={field.type}
                                     placeholder={field.placeholder}
-                                    value={quiz[field.id]}
+                                    value={quiz[field.id] ?? ""}
                                     onChange={(e) => handleQuizChange(field.id, e.target.value)}
                                     className={`p-3 rounded-lg border ${quizErrors[field.id] ? "border-red-400" : "border-gray-300"
                                         } bg-gray-50 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition w-full`}
                                 />
 
-                                {/* Spacing for accessibility messages */}
                                 {field.id === "startDate" && quizErrors.startDate && (
                                     <div className="text-sm text-red-500 mt-1">
-                                        {typeof quizErrors.startDate === 'string' ? quizErrors.startDate : 'Please choose today or a future date.'}
+                                        {typeof quizErrors.startDate === "string" ? quizErrors.startDate : "Please choose today or a future date."}
                                     </div>
                                 )}
 
@@ -534,7 +766,6 @@ function CreateTest() {
                         ))}
                     </div>
 
-                    {/* light datalist for audience suggestions (no heavy UI additions) */}
                     <datalist id="audience-list">
                         {audienceSuggestions.map((s) => (
                             <option key={s} value={s} />
@@ -580,9 +811,7 @@ function CreateTest() {
                             <h3 className="text-xl font-bold text-indigo-900 mb-4">
                                 Import {importedQuestions.length} Questions?
                             </h3>
-                            <p className="text-gray-600 mb-6">
-                                Would you like to save these questions to the database?
-                            </p>
+                            <p className="text-gray-600 mb-6">Would you like to save these questions to the database?</p>
                             <div className="flex gap-4 justify-end">
                                 <button
                                     className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition"
@@ -601,7 +830,6 @@ function CreateTest() {
                     </div>
                 )}
 
-                {/* Import Status */}
                 {!!importStatus && (
                     <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-lg">
                         {importStatus}
@@ -656,9 +884,7 @@ function CreateTest() {
                                 </div>
                             ))}
                             {errors[globalIdx]?.minOptions && (
-                                <div className="text-red-500 text-sm ml-8 mb-4">
-                                    At least two non-empty options are required.
-                                </div>
+                                <div className="text-red-500 text-sm ml-8 mb-4">At least two non-empty options are required.</div>
                             )}
                             {q.options.length < 4 && (
                                 <button

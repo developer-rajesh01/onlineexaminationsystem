@@ -1,4 +1,5 @@
-import './App.css';
+// src/App.js
+import "./App.css";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 import Layout from "./component/Layout";
@@ -12,12 +13,16 @@ import RegisterPage from "./pages/register";
 import FacultyDashboard from "./pages/faculty/Dashboard";
 import Questions from "./pages/faculty/questions";
 import Scoreboard from "./pages/faculty/scoreboard";
-import Profile from './pages/faculty/Profile';
+import Profile from "./pages/faculty/Profile";
 import CreateTest from "./pages/faculty/createTest";
 
 import StudentDashboard from "./pages/student/Dashboard";
 import StudentProfile from "./pages/student/Profile";
 import StudentScoreboard from "./pages/student/scoreboard";
+
+// New pages for test flow
+import StartTestPage from "./pages/StartTestPage";
+import SecureTestPage from "./pages/SecureTestPage";
 
 function App() {
   return (
@@ -31,49 +36,100 @@ function App() {
           <Route path="/login" element={<GuestRoute><LoginPage /></GuestRoute>} />
           <Route path="/register" element={<GuestRoute><RegisterPage /></GuestRoute>} />
 
-          {/* Faculty routes (nested under /) */}
-          <Route path="dashboard" element={
-            <ProtectedRoute roleRequired="faculty">
-              <FacultyDashboard />
-            </ProtectedRoute>
-          } />
-          <Route path="questions" element={
-            <ProtectedRoute roleRequired="faculty">
-              <Questions />
-            </ProtectedRoute>
-          } />
-          <Route path="scoreboard" element={
-            <ProtectedRoute roleRequired="faculty">
-              <Scoreboard />
-            </ProtectedRoute>
-          } />
-          <Route path="profile" element={
-            <ProtectedRoute roleRequired="faculty">
-              <Profile />
-            </ProtectedRoute>
-          } />
-          <Route path="createTest" element={
-            <ProtectedRoute roleRequired="faculty">
-              <CreateTest />
-            </ProtectedRoute>
-          } />
+          {/* Faculty routes */}
+          <Route
+            path="dashboard"
+            element={
+              <ProtectedRoute roleRequired="faculty">
+                <FacultyDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="questions"
+            element={
+              <ProtectedRoute roleRequired="faculty">
+                <Questions />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="scoreboard"
+            element={
+              <ProtectedRoute roleRequired="faculty">
+                <Scoreboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="profile"
+            element={
+              <ProtectedRoute roleRequired="faculty">
+                <Profile />
+              </ProtectedRoute>
+            }
+          />
 
-          {/* Student routes (nested under /student) */}
-          <Route path="student/dashboard" element={
-            <ProtectedRoute roleRequired="student">
-              <StudentDashboard />
-            </ProtectedRoute>
-          } />
-          <Route path="student/profile" element={
-            <ProtectedRoute roleRequired="student">
-              <StudentProfile />
-            </ProtectedRoute>
-          } />
-          <Route path="student/scoreboard" element={
-            <ProtectedRoute roleRequired="student">
-              <StudentScoreboard />
-            </ProtectedRoute>
-          } />
+          <Route
+            path="createTest"
+            element={
+              <ProtectedRoute roleRequired="faculty">
+                <CreateTest />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="createTest/:id"
+            element={
+              <ProtectedRoute roleRequired="faculty">
+                <CreateTest />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Student routes */}
+          <Route
+            path="student/dashboard"
+            element={
+              <ProtectedRoute roleRequired="student">
+                <StudentDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="student/profile"
+            element={
+              <ProtectedRoute roleRequired="student">
+                <StudentProfile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="student/scoreboard"
+            element={
+              <ProtectedRoute roleRequired="student">
+                <StudentScoreboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Start test (agreement) and Secure test (fullscreen attempt) */}
+          <Route
+            path="startTest/:id"
+            element={
+              <ProtectedRoute roleRequired="student">
+                <StartTestPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="secure-test/:attemptId"
+            element={
+              <ProtectedRoute roleRequired="student">
+                <SecureTestPage />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Optionally add 404 */}
           {/* <Route path="*" element={<NotFound />} /> */}
