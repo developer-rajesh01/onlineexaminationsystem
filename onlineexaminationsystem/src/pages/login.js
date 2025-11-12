@@ -26,7 +26,21 @@ function LoginPage() {
         localStorage.setItem("role", res.data.user.role);
         localStorage.setItem("name", res.data.user.name);
         localStorage.setItem("email", res.data.user.email);
-        localStorage.setItem("institute", res.data.user.institute); 
+        localStorage.setItem("institute", res.data.user.institute);
+
+        // ↓↓↓ IMPORTANT: store the keys your Questions component expects ↓↓↓
+        localStorage.setItem("userEmail", res.data.user.email || "");
+        // prefer a single display name if available, fall back to first+last
+        const fullName =
+          res.data.user.name ||
+          `${res.data.user.firstName || ""} ${
+            res.data.user.lastName || ""
+          }`.trim();
+        localStorage.setItem("userName", fullName);
+
+        // optional: store whole user JSON for convenience
+        localStorage.setItem("user", JSON.stringify(res.data.user || {}));
+
         setMessage("✅ Login successful! Redirecting...");
         setLoading(false);
 

@@ -1,25 +1,21 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
-const protect = async (req, res, next) => {
-  let token;
-
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith("Bearer")
-  ) {
-    try {
-      token = req.headers.authorization.split(" ")[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = await User.findById(decoded.id).select("-password");
-      next();
-    } catch (error) {
-      return res.status(401).json({ message: "Not authorized, token failed" });
-    }
+export default async function protect(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith("Bearer ")) {
+    // not authenticated, continue (controller can fallback to req.body uploader info)
+    return next();
   }
-
-  if (!token)
-    return res.status(401).json({ message: "No token, authorization denied" });
-};
-
-export default protect;
+  const token = header.split(" ")[1];
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    // select only fields you need:
+    const user = await User.findById(payload.id).select("_id email name");
+    if (user) req.user = user;
+  } catch (err) {
+    console.warn("JWT verify failed:", err.message);
+    // do not throw: allow controllers to still accept uploader info from body if provided
+  }
+  next();
+}

@@ -16,6 +16,7 @@
 
 
 import express from "express";
+import protect from "../middlewares/authMiddleware.js";
 import {
   bulkAddQuestions,
   getAllQuestions,
@@ -24,9 +25,10 @@ import {
 const router = express.Router();
 
 // Bulk insert questions
-router.post("/bulk", bulkAddQuestions);
+router.post("/bulk", protect, bulkAddQuestions);
 
 // Get all questions
-router.get("/", getAllQuestions);
+router.get("/", protect, getAllQuestions);
+
 
 export default router;
