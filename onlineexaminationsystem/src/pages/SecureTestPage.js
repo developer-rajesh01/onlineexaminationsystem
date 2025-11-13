@@ -1,6 +1,13 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Menu, X, AlertCircle, Clock, LogOut, CheckCircle, Circle } from "lucide-react";
+import { Menu, AlertCircle, Clock, LogOut, CheckCircle, Circle } from "lucide-react";
+
+const SESSION_KEY = "currentTestAttempt";
+const START_DISABLED_KEY = "startDisabled";
+
+function pad(n) {
+    return String(n).padStart(2, "0");
+}
 
 function formatCountdownMs(ms) {
     if (!isFinite(ms) || ms <= 0) return "00:00";
@@ -8,10 +15,130 @@ function formatCountdownMs(ms) {
     const h = Math.floor(totalSec / 3600);
     const m = Math.floor((totalSec % 3600) / 60);
     const s = totalSec % 60;
-    const pad = (n) => String(n).padStart(2, "0");
-    if (h > 0) return `${pad(h)}:${pad(m)}:${pad(s)}`;
-    return `${pad(m)}:${pad(s)}`;
+    return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
+
+function parseTestTimes(t) {
+    let startMs = NaN;
+    let endMs = NaN;
+
+    if (t?.startTimestamp) {
+        const s = new Date(t.startTimestamp).getTime();
+        if (!Number.isNaN(s)) startMs = s;
+    }
+
+    if (t?.endTimestamp) {
+        const e = new Date(t.endTimestamp).getTime();
+        if (!Number.isNaN(e)) endMs = e;
+    }
+
+    if (!isFinite(startMs) && t?.startDate && t?.startTime) {
+        const isoLocal = `${t.startDate}T${t.startTime}:00`;
+        const s = new Date(isoLocal).getTime();
+        if (!Number.isNaN(s)) startMs = s;
+    }
+
+    if (!isFinite(endMs) && isFinite(startMs) && typeof t.duration === "number") {
+        endMs = startMs + t.duration * 60000;
+    }
+
+    if (!isFinite(startMs) && isFinite(endMs) && typeof t.duration === "number") {
+        startMs = endMs - t.duration * 60000;
+    }
+
+    return { startMs: isFinite(startMs) ? startMs : NaN, endMs: isFinite(endMs) ? endMs : NaN };
+}
+
+function readSessionAttempt() {
+    try {
+        const raw = sessionStorage.getItem(SESSION_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+}
+
+function computeStartEndDuration(attemptObj, testObj) {
+    const { startMs: fixedStartMs, endMs: fixedEndMs } = parseTestTimes(testObj);
+
+    let userStartMs = NaN;
+    if (attemptObj && attemptObj.startedAt) {
+        const s = new Date(attemptObj.startedAt).getTime();
+        if (!Number.isNaN(s)) userStartMs = s;
+    } else {
+        const sessionAttempt = readSessionAttempt();
+        if (sessionAttempt?.startedAt) {
+            const s = new Date(sessionAttempt.startedAt).getTime();
+            if (!Number.isNaN(s)) userStartMs = s;
+        }
+    }
+
+    let durationMs = NaN;
+    if (attemptObj && typeof attemptObj.durationMinutes === "number") {
+        durationMs = attemptObj.durationMinutes * 60000;
+    } else if (testObj && typeof testObj.duration === "number") {
+        durationMs = testObj.duration * 60000;
+    }
+
+    let effectiveStartMs = NaN;
+    let effectiveEndMs = NaN;
+
+    if (isFinite(fixedStartMs) || isFinite(fixedEndMs)) {
+        effectiveStartMs = fixedStartMs;
+        effectiveEndMs = fixedEndMs;
+        if (!isFinite(effectiveEndMs) && isFinite(effectiveStartMs) && isFinite(durationMs)) {
+            effectiveEndMs = effectiveStartMs + durationMs;
+        }
+    } else if (isFinite(userStartMs) && isFinite(durationMs)) {
+        effectiveStartMs = userStartMs;
+        effectiveEndMs = userStartMs + durationMs;
+    }
+
+    return { startMs: effectiveStartMs, endMs: effectiveEndMs, durationMs };
+}
+
+function seededShuffle(array, seed) {
+    const arr = [...array];
+    let m = arr.length, t, i;
+
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) {
+        h = (h * 31 + seed.charCodeAt(i)) & 0xffffffff;
+    }
+    let rng = (h >>> 0) / 0xffffffff;
+
+    while (m) {
+        i = Math.floor(rng * m--);
+        rng = (rng * 1664525 + 1013904223) & 0xffffffff;
+        rng = (rng >>> 0) / 0xffffffff;
+        t = arr[m];
+        arr[m] = arr[i];
+        arr[i] = t;
+    }
+    return arr;
+}
+
+const getFullscreenElement = () =>
+    document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement || null;
+
+const requestFullscreenOnElement = async (el) => {
+    if (!el) return Promise.reject(new Error("No element"));
+    if (el.requestFullscreen) return el.requestFullscreen();
+    if (el.mozRequestFullScreen) return el.mozRequestFullScreen();
+    if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
+    if (el.msRequestFullscreen) return el.msRequestFullscreen();
+    return Promise.reject(new Error("Fullscreen not supported"));
+};
+
+const exitFullscreen = async () => {
+    if (getFullscreenElement()) {
+        if (document.exitFullscreen) return document.exitFullscreen();
+        if (document.mozCancelFullScreen) return document.mozCancelFullScreen();
+        if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
+        if (document.msExitFullscreen) return document.msExitFullscreen();
+    }
+    return Promise.resolve();
+};
 
 export default function SecureTestPage() {
     const { attemptId } = useParams();
@@ -23,191 +150,404 @@ export default function SecureTestPage() {
     const [currentSection, setCurrentSection] = useState(null);
     const [currentQIndex, setCurrentQIndex] = useState(0);
     const [localAnswers, setLocalAnswers] = useState({});
-    const [exitCount, setExitCount] = useState(0);
     const [blocked, setBlocked] = useState(false);
-    const [timeRemainingMs, setTimeRemainingMs] = useState(null);
+    const [timeLabel, setTimeLabel] = useState("N/A");
+    const [timeSubLabel, setTimeSubLabel] = useState(null);
+    const [timeRemainingMs, setTimeRemainingMs] = useState(NaN);
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [fullscreenWarning, setFullscreenWarning] = useState(false);
+    const [exitCount, setExitCount] = useState(0);
+    const [tabSwitchCount, setTabSwitchCount] = useState(0);
+    const [headerVisible, setHeaderVisible] = useState(true);
+    const [backPressCount, setBackPressCount] = useState(0);
+    const [headerPermanentlyHidden, setHeaderPermanentlyHidden] = useState(false);
 
     const tickRef = useRef(null);
-    const incInProgressRef = useRef(false);
+    const submittingRef = useRef(false);
+    const mountedRef = useRef(true);
     const fullscreenEnteredRef = useRef(false);
+    const hideHeaderTimeout = useRef(null);
 
-    // Load attempt & test
+    // === FORCE FULLSCREEN ON MOUNT ===
     useEffect(() => {
-        let mounted = true;
+        const enterFullscreen = async () => {
+            try {
+                if (!getFullscreenElement()) {
+                    await requestFullscreenOnElement(document.documentElement);
+                    fullscreenEnteredRef.current = true;
+                    setFullscreenWarning(false);
+                }
+            } catch (err) {
+                setFullscreenWarning(true);
+            }
+        };
+        enterFullscreen();
+    }, []);
+
+    // === EXIT FULLSCREEN → FORFEIT ===
+    useEffect(() => {
+        const onFullscreenChange = () => {
+            if (!getFullscreenElement()) {
+                immediateForfeit("fullscreen_exit");
+            } else {
+                fullscreenEnteredRef.current = true;
+                setFullscreenWarning(false);
+            }
+        };
+
+        const events = ["fullscreenchange", "webkitfullscreenchange", "mozfullscreenchange", "MSFullscreenChange"];
+        events.forEach(ev => document.addEventListener(ev, onFullscreenChange));
+
+        return () => events.forEach(ev => document.removeEventListener(ev, onFullscreenChange));
+    }, []);
+
+    // === IMMERSIVE HEADER: Hide after 3s inactivity ===
+    useEffect(() => {
+        if (blocked || loading || headerPermanentlyHidden) return;
+
+        const showHeader = () => {
+            if (headerPermanentlyHidden) return;
+            setHeaderVisible(true);
+            if (hideHeaderTimeout.current) clearTimeout(hideHeaderTimeout.current);
+            hideHeaderTimeout.current = setTimeout(() => {
+                if (!headerPermanentlyHidden) setHeaderVisible(false);
+            }, 3000);
+        };
+
+        const handleActivity = () => showHeader();
+
+        showHeader();
+        document.addEventListener("mousemove", handleActivity);
+        document.addEventListener("touchstart", handleActivity);
+
+        return () => {
+            document.removeEventListener("mousemove", handleActivity);
+            document.removeEventListener("touchstart", handleActivity);
+            if (hideHeaderTimeout.current) clearTimeout(hideHeaderTimeout.current);
+        };
+    }, [blocked, loading, headerPermanentlyHidden]);
+
+    
+    const handleManualSubmit = useCallback(
+        async (auto = false) => {
+            if (blocked || !attempt || submittingRef.current) return;
+            if (!auto && !window.confirm("Submit now?")) return;
+
+            submittingRef.current = true;
+            try {
+                const answersArr = Object.entries(localAnswers).map(([qIndexStr, selectedIdx]) => ({
+                    qIndex: Number(qIndexStr),
+                    selectedIdx,
+                }));
+                const res = await fetch(`http://localhost:5000/api/attempts/${attemptId}/submit`, {
+                    method: "PUT",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ answers: answersArr, forfeit: false, reason: auto ? "time_up" : "manual_submit" }),
+                });
+                const body = await res.json().catch(() => ({}));
+                alert(`Submitted! Score: ${body.score ?? "N/A"}`);
+            } catch (err) {
+                localStorage.setItem(
+                    `attempt_${attemptId}_pending_submit`,
+                    JSON.stringify({
+                        attemptId,
+                        answers: localAnswers,
+                        forfeit: false,
+                        reason: "manual_submit",
+                        ts: new Date().toISOString(),
+                    })
+                );
+                alert("Submit failed. Saved locally.");
+            } finally {
+                await exitFullscreen().catch(() => { });
+                localStorage.removeItem(`attempt_${attemptId}_answers`);
+                sessionStorage.removeItem(SESSION_KEY);
+                navigate("/student/dashboard");
+            }
+        },
+        [attempt, blocked, localAnswers, attemptId, navigate]
+    );
+
+    // === BACK BUTTON TRAP: single press → auto-submit and exit ===
+    useEffect(() => {
+        let isLeaving = false;
+
+        const handlePopState = async (e) => {
+            if (isLeaving || blocked) return;
+            e.preventDefault();
+
+            isLeaving = true;
+            setHeaderPermanentlyHidden(true);
+
+            await handleManualSubmit(true); // auto submit test with auto=true
+        };
+
+        const handleBeforeUnload = (e) => {
+            if (isLeaving) return;
+            e.preventDefault();
+            e.returnValue = "Test in progress. Leave anyway?";
+        };
+
+        window.history.pushState(null, "", window.location.href);
+
+        window.addEventListener("popstate", handlePopState);
+        window.addEventListener("beforeunload", handleBeforeUnload);
+
+        return () => {
+            isLeaving = true;
+            window.removeEventListener("popstate", handlePopState);
+            window.removeEventListener("beforeunload", handleBeforeUnload);
+        };
+    }, [blocked, handleManualSubmit]);
+
+    // === SESSION & LOCAL STORAGE ===
+    const readAttemptFromSession = () => {
+        try {
+            const raw = sessionStorage.getItem(SESSION_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch {
+            return null;
+        }
+    };
+
+    const writeAttemptToSession = (obj) => {
+        try {
+            sessionStorage.setItem(SESSION_KEY, JSON.stringify(obj));
+        } catch (e) {
+            console.warn(e);
+        }
+    };
+
+    const saveAnswersLocally = (answers) => {
+        try {
+            const key = `attempt_${attemptId}_answers`;
+            localStorage.setItem(key, JSON.stringify(answers));
+        } catch (e) {
+            console.warn("Failed to save answers locally", e);
+        }
+    };
+
+    const readAnswersLocally = () => {
+        try {
+            const key = `attempt_${attemptId}_answers`;
+            const raw = localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : {};
+        } catch {
+            return {};
+        }
+    };
+
+    // === LOAD ATTEMPT & TEST ===
+    useEffect(() => {
+        mountedRef.current = true;
         async function load() {
             try {
-                const res = await fetch(`http://localhost:5000/api/attempts/${attemptId}`, {
-                    credentials: "include",
-                });
+                const res = await fetch(`http://localhost:5000/api/attempts/${attemptId}`, { credentials: "include" });
                 if (!res.ok) throw new Error("Attempt not found");
                 const a = await res.json();
-
-                if (!mounted) return;
-
+                if (!mountedRef.current) return;
                 setAttempt(a);
-                setExitCount(a.exitCount || 0);
                 setBlocked(!!a.blocked);
+                setExitCount(a.exitCount || 0);
 
                 const tRes = await fetch(`http://localhost:5000/api/tests/${a.testId}`);
                 const tb = await tRes.json();
                 const t = tb.test || tb;
-                if (!mounted) return;
+                if (!mountedRef.current) return;
 
-                setTest(t);
+                const originalQuestions = Array.isArray(t.questions) ? t.questions : [];
+                const shuffledQuestions = seededShuffle(originalQuestions, attemptId);
 
-                const answersMap = {};
+                setTest({ ...t, questions: shuffledQuestions });
+
+                const serverAnswers = {};
                 (a.answers || []).forEach((ans) => {
-                    if (typeof ans.selectedIdx === "number") answersMap[ans.qIndex] = ans.selectedIdx;
+                    if (typeof ans.selectedIdx === "number") serverAnswers[ans.qIndex] = ans.selectedIdx;
                 });
-                setLocalAnswers(answersMap);
+                const local = readAnswersLocally();
+                setLocalAnswers({ ...serverAnswers, ...local });
 
-                const questions = Array.isArray(t.questions) ? t.questions : [];
-                const sections = questions.reduce((acc, q, idx) => {
+                const sections = shuffledQuestions.reduce((acc, q, idx) => {
                     const s = q.section || "Default";
                     if (!acc[s]) acc[s] = [];
                     acc[s].push(idx);
                     return acc;
                 }, {});
+                const first = Object.keys(sections)[0] || null;
+                setCurrentSection(first);
+                setCurrentQIndex((sections[first]?.[0]) ?? 0);
 
-                const firstSection = Object.keys(sections)[0] || null;
-                setCurrentSection(firstSection);
-                setCurrentQIndex((sections[firstSection]?.[0]) ?? 0);
-
-                const startedAt = new Date(a.startedAt).getTime();
-                const durationMs = (a.durationMinutes || t.duration || 0) * 60000;
-                const endAt = startedAt + durationMs;
-                setTimeRemainingMs(Math.max(0, endAt - Date.now()));
+                const { startMs, endMs, durationMs } = computeStartEndDuration(a, t);
+                computeAndSetTimeLabels(startMs, endMs, durationMs);
             } catch (err) {
-                console.error(err);
-                alert("Unable to load attempt/test: " + (err.message || ""));
-                navigate(-1);
+                console.warn("Attempt fetch failed", err);
+                navigate("/student/dashboard");
             } finally {
-                if (mounted) setLoading(false);
+                if (mountedRef.current) setLoading(false);
             }
         }
         load();
-        return () => (mounted = false);
+        return () => (mountedRef.current = false);
     }, [attemptId, navigate]);
 
-    // Enter fullscreen on test load
-    useEffect(() => {
-        if (!test || !attempt) return;
-        const attemptFullscreen = async () => {
-            if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-                try {
-                    await document.documentElement.requestFullscreen();
-                    fullscreenEnteredRef.current = true;
-                } catch (err) {
-                    console.warn("Fullscreen failed", err);
-                }
-            }
-        };
-        attemptFullscreen();
-    }, [test, attempt]);
-
-    // Server call to increment exit count
-    const incExitOnServer = async () => {
-        if (incInProgressRef.current) return null;
-        incInProgressRef.current = true;
-        try {
-            const r = await fetch(`http://localhost:5000/api/attempts/${attemptId}/inc-exit`, {
-                method: "PUT",
-                credentials: "include",
-            });
-            const body = await r.json().catch(() => ({}));
-            incInProgressRef.current = false;
-            return body;
-        } catch (err) {
-            incInProgressRef.current = false;
-            console.error("inc-exit failed", err);
-            return null;
-        }
-    };
-
-    // Handle fullscreen/tab exit detection
-    const handleDetectedExit = async () => {
-        if (!fullscreenEnteredRef.current || blocked) return;
-        const body = await incExitOnServer();
-        if (!body) return;
-
-        setExitCount(body.exitCount || 0);
-
-        if (body.status === "forfeited" || body.blocked) {
-            setBlocked(true);
-            try { localStorage.setItem("startDisabled", "true"); } catch (e) { }
-            alert("You exited fullscreen too many times. This attempt is forfeited.");
-            setTimeout(() => navigate("/student/dashboard"), 1500);
+    // === TIME LABELS ===
+    const computeAndSetTimeLabels = (startMs, endMs, durationMs) => {
+        const now = Date.now();
+        if (!Number.isFinite(startMs) && !Number.isFinite(endMs) && !Number.isFinite(durationMs)) {
+            setTimeLabel("N/A");
+            setTimeSubLabel(null);
+            setTimeRemainingMs(NaN);
             return;
         }
 
-        alert(`Warning: You left fullscreen. Attempt ${body.exitCount || 0} of 3. Stay in fullscreen!`);
-        try {
-            if (document.documentElement.requestFullscreen) {
-                await document.documentElement.requestFullscreen();
+        if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
+            if (now < startMs) {
+                const untilStart = Math.max(0, startMs - now);
+                setTimeLabel(`Starts in: ${formatCountdownMs(untilStart)}`);
+                setTimeSubLabel(`Duration: ${formatCountdownMs(Math.max(0, endMs - startMs))}`);
+                setTimeRemainingMs(Math.max(0, endMs - startMs));
+            } else {
+                const remaining = Math.max(0, endMs - now);
+                setTimeLabel(`Remaining: ${formatCountdownMs(remaining)}`);
+                setTimeSubLabel(null);
+                setTimeRemainingMs(remaining);
             }
-        } catch { }
+            return;
+        }
+
+        if (Number.isFinite(endMs)) {
+            const remaining = Math.max(0, endMs - now);
+            setTimeLabel(`Remaining: ${formatCountdownMs(remaining)}`);
+            setTimeSubLabel(null);
+            setTimeRemainingMs(remaining);
+            return;
+        }
+
+        if (Number.isFinite(startMs) && Number.isFinite(durationMs)) {
+            const end = startMs + durationMs;
+            if (now < startMs) {
+                const untilStart = Math.max(0, startMs - now);
+                setTimeLabel(`Starts in: ${formatCountdownMs(untilStart)}`);
+                setTimeSubLabel(`Duration: ${formatCountdownMs(durationMs)}`);
+                setTimeRemainingMs(durationMs);
+            } else {
+                const remaining = Math.max(0, end - now);
+                setTimeLabel(`Remaining: ${formatCountdownMs(remaining)}`);
+                setTimeSubLabel(null);
+                setTimeRemainingMs(remaining);
+            }
+            return;
+        }
+
+        if (Number.isFinite(durationMs)) {
+            setTimeLabel(`Duration: ${formatCountdownMs(durationMs)}`);
+            setTimeSubLabel(null);
+            setTimeRemainingMs(durationMs);
+            return;
+        }
+
+        setTimeLabel("N/A");
+        setTimeSubLabel(null);
+        setTimeRemainingMs(NaN);
     };
 
-    // Monitor fullscreen & tab switching
+    // === TICK: TIME + AUTO-SUBMIT ===
     useEffect(() => {
-        if (!attempt || blocked) return;
-        let lastBlurTs = 0;
+        if (!attempt || !test || blocked) return;
 
-        const onFullscreenChange = () => {
-            if (!document.fullscreenElement) {
-                handleDetectedExit();
-            } else {
-                fullscreenEnteredRef.current = true;
+        const tick = async () => {
+            const { startMs, endMs, durationMs } = computeStartEndDuration(attempt, test);
+            computeAndSetTimeLabels(startMs, endMs, durationMs);
+
+            if (Number.isFinite(endMs)) {
+                const remain = Math.max(0, endMs - Date.now());
+                if (remain <= 0 && !submittingRef.current) {
+                    submittingRef.current = true;
+                    await handleManualSubmit(true);
+                }
             }
         };
 
+        tick();
+        tickRef.current = setInterval(tick, 1000);
+        return () => clearInterval(tickRef.current);
+    }, [attempt, test, localAnswers, blocked, attemptId, navigate]);
+
+    // === FORFEIT & AUTO-SUBMIT ===
+    const immediateForfeit = async (reason) => {
+        if (submittingRef.current) return;
+        submittingRef.current = true;
+        setBlocked(true);
+        setHeaderPermanentlyHidden(true);
+
+        try {
+            const scopedKey = `${START_DISABLED_KEY}_${attempt?.testId || test?._id || test?.id || ""}`;
+            localStorage.setItem(scopedKey, "true");
+        } catch (e) { }
+
+        try {
+            const answersArr = Object.entries(localAnswers).map(([qIndexStr, selectedIdx]) => ({
+                qIndex: Number(qIndexStr),
+                selectedIdx,
+            }));
+            await fetch(`http://localhost:5000/api/attempts/${attemptId}/submit`, {
+                method: "PUT",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ answers: answersArr, forfeit: true, reason }),
+            }).catch(() => { });
+        } catch (err) {
+            console.error("Forfeit failed", err);
+        } finally {
+            await exitFullscreen().catch(() => { });
+            localStorage.removeItem(`attempt_${attemptId}_answers`);
+            sessionStorage.removeItem(SESSION_KEY);
+            setTimeout(() => navigate("/student/dashboard"), 300);
+        }
+    };
+
+    // === TAB SWITCH / BLUR ===
+    useEffect(() => {
+        if (!attempt || blocked) return;
+
         const onVisibilityChange = () => {
             if (document.visibilityState === "hidden") {
-                handleDetectedExit();
+                setTabSwitchCount(p => p + 1);
+                immediateForfeit("tab_switch");
             }
         };
 
         const onBlur = () => {
-            const now = Date.now();
-            if (now - lastBlurTs < 500) return;
-            lastBlurTs = now;
-            handleDetectedExit();
+            setTabSwitchCount(p => p + 1);
+            immediateForfeit("blur");
         };
 
-        document.addEventListener("fullscreenchange", onFullscreenChange);
         document.addEventListener("visibilitychange", onVisibilityChange);
         window.addEventListener("blur", onBlur);
 
         return () => {
-            document.removeEventListener("fullscreenchange", onFullscreenChange);
             document.removeEventListener("visibilitychange", onVisibilityChange);
             window.removeEventListener("blur", onBlur);
         };
-    }, [attempt, attemptId, blocked]);
+    }, [attempt, blocked, localAnswers]);
 
-    // Timer tick
-    useEffect(() => {
-        if (!attempt || !test || blocked) return;
-
-        tickRef.current = setInterval(() => {
-            const startedAt = new Date(attempt.startedAt).getTime();
-            const durationMs = (attempt.durationMinutes || test.duration || 0) * 60000;
-            const endAt = startedAt + durationMs;
-            const remain = Math.max(0, endAt - Date.now());
-            setTimeRemainingMs(remain);
-
-            if (remain <= 0) {
-                clearInterval(tickRef.current);
-                handleSubmit(true); // auto-submit
-            }
-        }, 1000);
-
-        return () => clearInterval(tickRef.current);
-    }, [attempt, test, localAnswers, blocked]);
-
-    // Navigation handlers
-    const selectAnswer = (qIdx, idx) => setLocalAnswers((prev) => ({ ...prev, [qIdx]: idx }));
+    // === ANSWER HANDLING ===
+    const selectAnswer = (qIdx, idx) => {
+        setLocalAnswers(prev => {
+            const updated = { ...prev, [qIdx]: idx };
+            saveAnswersLocally(updated);
+            try {
+                const s = readAttemptFromSession() || {};
+                s.answers = Object.entries(updated).map(([qIndexStr, selectedIdx]) => ({
+                    qIndex: Number(qIndexStr),
+                    selectedIdx,
+                }));
+                writeAttemptToSession(s);
+            } catch (e) { }
+            return updated;
+        });
+    };
 
     const handlePrev = () => {
         const sections = getSections();
@@ -247,52 +587,23 @@ export default function SecureTestPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
             });
+            saveAnswersLocally(localAnswers);
+            alert("Progress saved.");
         } catch (err) {
-            console.warn("Auto-save failed", err);
+            saveAnswersLocally(localAnswers);
+            alert("Saved locally.");
         }
     };
 
-    const handleSubmit = async (auto = false) => {
-        if (blocked || !attempt) return;
+  
 
-        const confirmMsg = auto
-            ? "Time's up! Submitting automatically..."
-            : "Are you sure you want to submit? This action cannot be undone.";
-
-        if (!auto && !window.confirm(confirmMsg)) return;
-
-        try {
-            const answersArr = Object.entries(localAnswers).map(([qIndexStr, selectedIdx]) => ({
-                qIndex: Number(qIndexStr),
-                selectedIdx,
-            }));
-
-            const res = await fetch(`http://localhost:5000/api/attempts/${attemptId}/submit`, {
-                method: "PUT",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ answers: answersArr, forfeit: false }),
-            });
-
-            const body = await res.json();
-            if (!res.ok) throw new Error(body.message || "Submit failed");
-
-            alert(`Submitted! Score: ${body.score ?? "N/A"} / ${body.totalMarks ?? "N/A"}`);
-            if (document.fullscreenElement) await document.exitFullscreen().catch(() => { });
-            navigate("/student/dashboard");
-        } catch (err) {
-            console.error("Submit error", err);
-            alert("Submit failed: " + (err.message || "Network error"));
-        }
-    };
-
-    // Loading & blocked states
+    // === RENDER ===
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600 mx-auto"></div>
-                    <p className="mt-4 text-gray-600">Loading secure test...</p>
+            <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-lg p-8 text-center w-full max-w-md">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600 font-medium">Loading secure test...</p>
                 </div>
             </div>
         );
@@ -300,15 +611,12 @@ export default function SecureTestPage() {
 
     if (blocked) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-red-50 p-4">
-                <div className="bg-white rounded-lg shadow-lg p-6 max-w-md text-center">
+            <div className="min-h-screen bg-gradient-to-br from-red-50 to-rose-100 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-xl p-8 text-center max-w-md w-full border border-red-100">
                     <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-                    <h2 className="text-xl font-bold text-red-700">Test Blocked</h2>
-                    <p className="text-gray-600 mt-2">You exited fullscreen too many times. This attempt has been forfeited.</p>
-                    <button
-                        onClick={() => navigate("/student/dashboard")}
-                        className="mt-6 px-6 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700"
-                    >
+                    <h2 className="text-2xl font-bold text-red-700 mb-2">Test Blocked</h2>
+                    <p className="text-gray-600 mb-6">Attempt forfeited due to security violation.</p>
+                    <button onClick={() => navigate("/student/dashboard")} className="px-6 py-3 bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-xl font-semibold hover:from-sky-700 hover:to-indigo-700 transition shadow-md">
                         Back to Dashboard
                     </button>
                 </div>
@@ -317,110 +625,105 @@ export default function SecureTestPage() {
     }
 
     if (!test || !attempt) {
-        return <div className="p-6 text-red-600">Test data not available.</div>;
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-lg p-8 text-center max-w-md w-full">
+                    <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
+                    <p className="text-red-600 font-medium text-lg">Test not available.</p>
+                </div>
+            </div>
+        );
     }
 
-    // Prepare data
-    const questions = Array.isArray(test.questions) ? test.questions : [];
+    const questions = test.questions || [];
     const sections = getSections();
     const currentSectionQuestions = sections[currentSection] || [];
     const qIndex = currentQIndex;
     const q = questions[qIndex] || {};
     const totalQuestions = questions.length;
-
     const questionStatuses = questions.map((_, idx) => {
-        if (localAnswers[idx] !== undefined) return 1; // answered
-        if (idx === currentQIndex) return 2; // current
-        return 0; // not visited
+        if (localAnswers[idx] !== undefined) return 1;
+        if (idx === currentQIndex) return 2;
+        return 0;
     });
-
     const answeredCount = Object.keys(localAnswers).length;
     const progress = ((answeredCount / totalQuestions) * 100).toFixed(0);
 
     return (
-        <div className="min-h-screen bg-gray-100 flex flex-col">
-            {/* Header */}
-            <header className="bg-white shadow-sm border-b border-gray-200 px-4 py-3 flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                    <button
-                        onClick={() => setSidebarOpen(!sidebarOpen)}
-                        className="lg:hidden p-2 rounded-lg hover:bg-gray-100"
-                    >
-                        {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-                    </button>
-                    <div>
-                        <h1 className="text-lg font-bold text-gray-800">{test.title}</h1>
-                        <p className="text-xs text-gray-500">{test.institute} • {test.courseName || test.targetAudience}</p>
+        <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex flex-col overflow-hidden">
+
+            {/* Fullscreen Warning */}
+            {fullscreenWarning && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl p-8 text-center max-w-md">
+                        <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+                        <h2 className="text-2xl font-bold text-red-700 mb-3">Fullscreen Required</h2>
+                        <p className="text-gray-600 mb-6">You must be in fullscreen to take this test.</p>
+                        <button
+                            onClick={async () => {
+                                try {
+                                    await requestFullscreenOnElement(document.documentElement);
+                                    setFullscreenWarning(false);
+                                } catch {
+                                    alert("Please enable fullscreen in your browser.");
+                                }
+                            }}
+                            className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-semibold"
+                        >
+                            Enter Fullscreen
+                        </button>
                     </div>
                 </div>
+            )}
 
-                <div className="flex items-center space-x-4">
-                    <div className="text-right hidden sm:block">
-                        <div className="flex items-center gap-1 text-red-600 font-mono text-lg">
-                            <Clock className="w-5 h-5" />
-                            {formatCountdownMs(timeRemainingMs)}
-                        </div>
-                        <div className="text-xs text-gray-500 flex items-center gap-1">
-                            <LogOut className="w-3 h-3" />
-                            Exits: {exitCount}/3
-                        </div>
-                    </div>
-                    <button
-                        onClick={() => handleSubmit(false)}
-                        className="px-4 py-2 bg-sky-600 text-white rounded-lg text-sm font-medium hover:bg-sky-700 transition"
-                    >
-                        Submit
-                    </button>
-                </div>
-            </header>
-
-            <div className="flex-1 flex flex-col lg:flex-row">
-                {/* Mobile Sidebar Overlay */}
-                {sidebarOpen && (
-                    <div
-                        className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
-                        onClick={() => setSidebarOpen(false)}
-                    />
-                )}
-
-                {/* Sidebar - Responsive */}
-                <aside
-                    className={`${sidebarOpen ? "translate-x-0" : "-translate-x-full"
-                        } lg:translate-x-0 fixed lg:static inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transition-transform duration-300 ease-in-out flex flex-col`}
-                >
-                    <div className="p-4 border-b">
-                        <div className="flex justify-between items-center mb-3">
-                            <h3 className="font-semibold text-gray-700">Question Palette</h3>
-                            <button
-                                onClick={() => setSidebarOpen(false)}
-                                className="lg:hidden p-1 rounded hover:bg-gray-100"
-                            >
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-                        <div className="text-xs text-gray-600">
-                            Answered: {answeredCount}/{totalQuestions} ({progress}%)
+            {/* Header - Hidden permanently after back press */}
+            {!headerPermanentlyHidden && (
+                <header className={`bg-white/90 backdrop-blur-md shadow-md border-b border-gray-100/50 px-6 py-4 flex items-center justify-between sticky top-0 z-40 transition-opacity duration-500 ${headerVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+                    <div className="flex items-center space-x-4">
+                        <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 rounded-md hover:bg-gray-100 transition">
+                            <Menu className="w-5 h-5 text-gray-700" />
+                        </button>
+                        <div>
+                            <h1 className="text-2xl font-semibold text-gray-900">{test.title}</h1>
+                            <p className="text-sm text-gray-500 mt-1">{test.institute} • {test.courseName || test.targetAudience}</p>
                         </div>
                     </div>
+                    <div className="flex items-center space-x-6">
+                        <div className="text-right hidden sm:block">
+                            <div className="flex items-center gap-2 text-red-600 font-mono text-lg">
+                                <Clock className="w-5 h-5" />
+                                <div>
+                                    <div className="font-semibold">{timeLabel}</div>
+                                    {timeSubLabel && <div className="text-xs text-gray-500 mt-0.5">{timeSubLabel}</div>}
+                                </div>
+                            </div>
+                            <div className="text-xs text-gray-500 flex items-center gap-2 mt-1">
+                                <LogOut className="w-4 h-4" />
+                                Exits: {exitCount} • Tabs: {tabSwitchCount}
+                            </div>
+                        </div>
+                        <button onClick={() => handleManualSubmit(false)} className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-lg text-sm font-medium hover:from-indigo-700 hover:to-blue-700 transition shadow-sm">
+                            Submit Test
+                        </button>
+                    </div>
+                </header>
+            )}
 
-                    <div className="flex-1 overflow-y-auto p-4">
-                        <div className="grid grid-cols-5 gap-2">
+            <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+                {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+
+                <aside className={`${sidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0 fixed lg:static inset-y-0 left-0 z-50 w-72 bg-white shadow-lg transition-transform duration-300 ease-in-out flex flex-col border-r border-gray-100`}>
+                    <div className="p-5 border-b border-gray-100">
+                        <h3 className="text-lg font-semibold text-gray-800">Question Palette</h3>
+                        <div className="text-sm text-gray-600 mt-2">Answered: {answeredCount}/{totalQuestions} ({progress}%)</div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-5">
+                        <div className="grid grid-cols-5 gap-3">
                             {questions.map((_, idx) => {
                                 const status = questionStatuses[idx];
                                 return (
-                                    <button
-                                        key={idx}
-                                        onClick={() => {
-                                            setCurrentQIndex(idx);
-                                            setSidebarOpen(false);
-                                        }}
-                                        className={`w-9 h-9 rounded-lg text-xs font-medium transition-all flex items-center justify-center ${status === 1
-                                                ? "bg-green-500 text-white"
-                                                : status === 2
-                                                    ? "bg-red-500 text-white ring-2 ring-offset-2 ring-red-500"
-                                                    : "bg-gray-200 text-gray-600 hover:bg-gray-300"
-                                            }`}
-                                    >
+                                    <button key={idx} onClick={() => { setCurrentQIndex(idx); setSidebarOpen(false); }} className={`w-10 h-10 rounded-lg text-sm font-medium transition-all flex items-center justify-center ${status === 1 ? "bg-green-500 text-white hover:bg-green-600" : status === 2 ? "bg-red-500 text-white ring-2 ring-red-300" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
                                         {idx + 1}
                                     </button>
                                 );
@@ -428,87 +731,44 @@ export default function SecureTestPage() {
                         </div>
                     </div>
 
-                    <div className="p-4 border-t space-y-3">
-                        <div className="flex items-center gap-2 text-xs">
-                            <div className="w-4 h-4 bg-green-500 rounded"></div>
-                            <span>Answered</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs">
-                            <div className="w-4 h-4 bg-red-500 rounded"></div>
-                            <span>Current</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs">
-                            <div className="w-4 h-4 bg-gray-200 rounded"></div>
-                            <span>Not Visited</span>
-                        </div>
+                    <div className="p-5 border-t border-gray-100 space-y-2 bg-gray-50">
+                        <div className="flex items-center gap-2 text-sm"><div className="w-4 h-4 bg-green-500 rounded"></div><span>Answered</span></div>
+                        <div className="flex items-center gap-2 text-sm"><div className="w-4 h-4 bg-red-500 rounded"></div><span>Current</span></div>
+                        <div className="flex items-center gap-2 text-sm"><div className="w-4 h-4 bg-gray-100 rounded border"></div><span>Not Visited</span></div>
                     </div>
                 </aside>
 
-                {/* Main Content */}
-                <main className="flex-1 p-4 lg:p-6 overflow-y-auto">
-                    {/* Mobile Timer */}
-                    <div className="sm:hidden flex justify-between items-center mb-4 p-3 bg-white rounded-lg shadow">
-                        <div className="flex items-center gap-1 text-red-600 font-mono">
-                            <Clock className="w-5 h-5" />
-                            {formatCountdownMs(timeRemainingMs)}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                            Exits: {exitCount}/3
-                        </div>
+                <main className="flex-1 p-6 overflow-y-auto">
+                    <div className="sm:hidden flex justify-between items-center mb-6 p-4 bg-white rounded-lg shadow">
+                        <div className="flex items-center gap-2 text-red-600 font-mono text-base"><Clock className="w-5 h-5" />{timeLabel}</div>
+                        <div className="text-xs text-gray-500">Exits: {exitCount}</div>
                     </div>
 
-                    {/* Sections */}
-                    <div className="mb-5">
+                    <div className="mb-6">
                         <label className="block text-sm font-medium text-gray-700 mb-2">Sections</label>
                         <div className="flex flex-wrap gap-2">
                             {Object.keys(sections).map((s) => (
-                                <button
-                                    key={s}
-                                    onClick={() => setCurrentSection(s)}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${currentSection === s
-                                            ? "bg-sky-600 text-white"
-                                            : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
-                                        }`}
-                                >
+                                <button key={s} onClick={() => setCurrentSection(s)} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${currentSection === s ? "bg-indigo-600 text-white" : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"}`}>
                                     {s}
                                 </button>
                             ))}
                         </div>
                     </div>
 
-                    {/* Question Card */}
-                    <div className="bg-white rounded-xl shadow-md p-5 lg:p-6 mb-6">
+                    <div className="bg-white rounded-xl shadow-md p-6 mb-6">
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <span className="text-sm text-gray-500">Question {qIndex + 1} of {totalQuestions}</span>
-                                <h3 className="text-lg lg:text-xl font-semibold text-gray-800 mt-1">
-                                    {q?.questionText || "No question text"}
-                                </h3>
+                                <h3 className="text-xl font-semibold text-gray-800 mt-1">{q?.questionText || "No question text"}</h3>
                             </div>
-                            {q.marks && (
-                                <span className="text-sm font-medium text-sky-600 bg-sky-50 px-2 py-1 rounded">
-                                    {q.marks} mark{q.marks > 1 ? "s" : ""}
-                                </span>
-                            )}
+                            {q.marks && <span className="text-sm font-medium text-indigo-600 bg-indigo-50 px-3 py-1 rounded">{q.marks} mark{q.marks > 1 ? "s" : ""}</span>}
                         </div>
 
-                        <div className="space-y-3 mt-5">
+                        <div className="space-y-4 mt-6">
                             {Array.isArray(q.options) && q.options.length > 0 ? (
                                 q.options.map((opt, i) => (
-                                    <label
-                                        key={i}
-                                        className={`flex items-center p-4 rounded-lg border-2 cursor-pointer transition-all ${localAnswers[qIndex] === i
-                                                ? "border-sky-600 bg-sky-50"
-                                                : "border-gray-200 hover:border-gray-300 bg-white"
-                                            }`}
-                                    >
-                                        <input
-                                            type="radio"
-                                            name={`q${qIndex}`}
-                                            checked={localAnswers[qIndex] === i}
-                                            onChange={() => selectAnswer(qIndex, i)}
-                                            className="w-5 h-5 text-sky-600 focus:ring-sky-500"
-                                        />
+                                    <label key={i} className={`flex items-center p-4 rounded-lg border cursor-pointer transition-all ${localAnswers[qIndex] === i ? "border-indigo-600 bg-indigo-50" : "border-gray-200 hover:border-gray-300 bg-white"}`}>
+                                        <input type="radio" name={`q${qIndex}`} checked={localAnswers[qIndex] === i} onChange={() => selectAnswer(qIndex, i)} className="w-5 h-5 text-indigo-600 focus:ring-indigo-500" />
                                         <span className="ml-3 text-gray-800">{opt.text ?? opt}</span>
                                     </label>
                                 ))
@@ -518,36 +778,20 @@ export default function SecureTestPage() {
                         </div>
                     </div>
 
-                    {/* Navigation Buttons */}
-                    <div className="flex flex-wrap gap-3 justify-between">
-                        <div className="flex gap-2">
-                            <button
-                                onClick={handlePrev}
-                                disabled={currentSectionQuestions.indexOf(currentQIndex) === 0}
-                                className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                ← Previous
+                    <div className="flex flex-col sm:flex-row gap-4 justify-between">
+                        <div className="flex gap-4">
+                            <button onClick={handlePrev} disabled={currentSectionQuestions.indexOf(currentQIndex) === 0} className="px-6 py-3 bg-white border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition">
+                                Previous
                             </button>
-                            <button
-                                onClick={handleNext}
-                                disabled={currentSectionQuestions.indexOf(currentQIndex) === currentSectionQuestions.length - 1}
-                                className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Next →
+                            <button onClick={handleNext} disabled={currentSectionQuestions.indexOf(currentQIndex) === currentSectionQuestions.length - 1} className="px-6 py-3 bg-white border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition">
+                                Next
                             </button>
                         </div>
-
-                        <div className="flex gap-2">
-                            <button
-                                onClick={saveAnswersToServer}
-                                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200"
-                            >
+                        <div className="flex gap-4">
+                            <button onClick={saveAnswersToServer} className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition">
                                 Save Progress
                             </button>
-                            <button
-                                onClick={() => handleSubmit(false)}
-                                className="px-6 py-2 bg-sky-600 text-white rounded-lg text-sm font-medium hover:bg-sky-700 transition"
-                            >
+                            <button onClick={() => handleManualSubmit(false)} className="px-6 py-3 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition">
                                 Submit Test
                             </button>
                         </div>
@@ -555,34 +799,11 @@ export default function SecureTestPage() {
                 </main>
             </div>
 
-            {/* Mobile Bottom Bar */}
-            <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-3 flex justify-around items-center shadow-lg">
-                <button
-                    onClick={() => setSidebarOpen(true)}
-                    className="flex flex-col items-center text-xs text-gray-600"
-                >
-                    <Circle className="w-5 h-5" />
-                    <span>Palette</span>
-                </button>
-                <button
-                    onClick={handlePrev}
-                    className="flex flex-col items-center text-xs text-gray-600"
-                >
-                    ← Prev
-                </button>
-                <button
-                    onClick={handleNext}
-                    className="flex flex-col items-center text-xs text-gray-600"
-                >
-                    Next →
-                </button>
-                <button
-                    onClick={() => handleSubmit(false)}
-                    className="flex flex-col items-center text-xs font-medium text-sky-600"
-                >
-                    <CheckCircle className="w-5 h-5" />
-                    <span>Submit</span>
-                </button>
+            <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-3 flex justify-around items-center shadow-lg z-40">
+                <button onClick={() => setSidebarOpen(true)} className="flex flex-col items-center text-xs text-gray-600"><Circle className="w-5 h-5" /><span>Palette</span></button>
+                <button onClick={handlePrev} disabled={currentSectionQuestions.indexOf(currentQIndex) === 0} className="flex flex-col items-center text-xs text-gray-600 disabled:opacity-50">Prev</button>
+                <button onClick={handleNext} disabled={currentSectionQuestions.indexOf(currentQIndex) === currentSectionQuestions.length - 1} className="flex flex-col items-center text-xs text-gray-600 disabled:opacity-50">Next</button>
+                <button onClick={() => handleManualSubmit(false)} className="flex flex-col items-center text-xs font-medium text-indigo-600"><CheckCircle className="w-5 h-5" /><span>Submit</span></button>
             </div>
         </div>
     );

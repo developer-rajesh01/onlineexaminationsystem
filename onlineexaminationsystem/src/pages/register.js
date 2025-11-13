@@ -1,3 +1,4 @@
+// src/pages/Register.jsx
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -6,13 +7,22 @@ import image from "../assets/login.jpg";
 const institutes = [
   "poornima university",
   "poornima Institute ",
-  "Institute C",
-  "Institute of Technology",
-  "Institute of Science",
-  "New Horizon Institute",
 ];
 
-function Register() {
+const courses = [
+  "MCA",
+  "M.Tech",
+  "MBA",
+  "BBA",
+  "BCA",
+  "B.Sc",
+  "B.Com",
+  "BE/B.Tech",
+  "PhD",
+  "Diploma",
+];
+
+export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
 
@@ -22,14 +32,16 @@ function Register() {
     password: "",
     role: "",
     institute: "",
+    branchBatch: "", // combined select value for students
   });
 
   const [filteredInstitutes, setFilteredInstitutes] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const onInstituteInputChange = (e) => {
     const userInput = e.target.value;
-    setFormData({ ...formData, institute: userInput });
+    setFormData((prev) => ({ ...prev, institute: userInput }));
 
     if (userInput.length > 0) {
       const filtered = institutes.filter((inst) =>
@@ -44,28 +56,63 @@ function Register() {
   };
 
   const onSuggestionClick = (suggestion) => {
-    setFormData({ ...formData, institute: suggestion });
+    setFormData((prev) => ({ ...prev, institute: suggestion }));
     setFilteredInstitutes([]);
     setShowSuggestions(false);
   };
 
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const handleRoleChange = (value) => {
+    setFormData((prev) => ({
+      ...prev,
+      role: value,
+      branchBatch: value === "student" ? prev.branchBatch : "",
+    }));
+  };
+
+  const validate = () => {
+    if (!formData.name.trim()) return "Name is required.";
+    if (!formData.email.trim()) return "Email is required.";
+    if (!formData.password) return "Password is required.";
+    if (!formData.role) return "Role is required.";
+    if (!formData.institute.trim()) return "Institute is required.";
+
+    if (formData.role === "student") {
+      if (!formData.branchBatch) return "Please select a course or batch.";
+    }
+
+    return null;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isSubmitting) return;
+
+    const validationError = validate();
+    if (validationError) {
+      alert(validationError);
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
+      // trim fields
       const payload = {
-        name: formData.name,
-        email: formData.email,
+        name: formData.name.trim(),
+        email: formData.email.trim().toLowerCase(),
         password: formData.password,
         role: formData.role,
-        institute: formData.institute,
+        institute: formData.institute.trim(),
       };
 
-      const res = await axios.post("http://localhost:5000/api/auth/register", payload);
+      if (formData.role === "student") {
+        payload.branchBatch = formData.branchBatch;
+      }
+
+      const res = await axios.post("http://localhost:5000/api/auth/register", payload, {
+        headers: { "Content-Type": "application/json" },
+      });
+
       alert(res.data.message || "Registration Successful!");
       navigate("/login");
     } catch (error) {
@@ -75,7 +122,7 @@ function Register() {
     }
   };
 
-
+  const batchOptions = Array.from({ length: 10 }, (_, i) => `Batch ${i + 1}`);
 
   return (
     <div className="min-h-screen flex items-center justify-center px-2">
@@ -96,6 +143,7 @@ function Register() {
               className="w-full px-4 py-3 mb-4 rounded-xl bg-white border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
               required
             />
+
             <input
               type="email"
               name="email"
@@ -105,10 +153,11 @@ function Register() {
               className="w-full px-4 py-3 mb-4 rounded-xl bg-white border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
               required
             />
+
             <select
               name="role"
               value={formData.role}
-              onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+              onChange={(e) => handleRoleChange(e.target.value)}
               className="w-full px-4 py-3 mb-4 rounded-xl bg-white border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
               required
             >
@@ -119,7 +168,6 @@ function Register() {
               <option value="student">Student</option>
             </select>
 
-            {/* Autocomplete Institute Input */}
             <div className="relative mb-4">
               <input
                 type="text"
@@ -146,6 +194,39 @@ function Register() {
               )}
             </div>
 
+            {formData.role === "student" && (
+              <div className="mb-4">
+                <label className="text-sm text-gray-600 mb-1 block">Course or Batch</label>
+                <select
+                  name="branchBatch"
+                  value={formData.branchBatch}
+                  onChange={(e) => setFormData({ ...formData, branchBatch: e.target.value })}
+                  className="w-full px-4 py-3 rounded-xl bg-white border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  required
+                >
+                  <option value="" disabled>
+                    Select course or batch
+                  </option>
+
+                  <optgroup label="Courses">
+                    {courses.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </optgroup>
+
+                  <optgroup label="Batches">
+                    {batchOptions.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+            )}
+
             <div className="relative mb-6">
               <input
                 type={showPassword ? "text" : "password"}
@@ -168,9 +249,10 @@ function Register() {
 
             <button
               type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 transition text-white py-3 rounded-xl font-semibold mb-2"
+              disabled={isSubmitting}
+              className="w-full bg-blue-600 hover:bg-blue-700 transition text-white py-3 rounded-xl font-semibold mb-2 disabled:opacity-60"
             >
-              Register
+              {isSubmitting ? "Registering..." : "Register"}
             </button>
           </form>
 
@@ -185,10 +267,8 @@ function Register() {
         <div
           className="md:w-1/2 w-full relative flex flex-col justify-center items-center bg-center bg-cover"
           style={{ backgroundImage: `url(${image})` }}
-        ></div>
+        />
       </div>
     </div>
   );
 }
-
-export default Register;

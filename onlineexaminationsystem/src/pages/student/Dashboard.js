@@ -163,8 +163,8 @@ function computeStatusFromTimes(startMs, endMs, nowMs = Date.now()) {
 
 export default function StudentDashboard() {
   const navigate = useNavigate();
-  const studentCourseName = localStorage.getItem("studentCourseName") || "MCA";
-  const studentInstituteName = localStorage.getItem("studentInstituteName") || "poornima university";
+  const studentCourseName = localStorage.getItem("branch") || "";
+  const studentInstituteName = localStorage.getItem("institute") || "";
 
   const [tab, setTab] = useState("active");
   const [allTasks, setAllTasks] = useState([]);
@@ -173,10 +173,28 @@ export default function StudentDashboard() {
   const [errorMsg, setErrorMsg] = useState("");
   const socketRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
-  const [startDisabled, setStartDisabled] = useState(localStorage.getItem("startDisabled") === "true");
+
+  // per-test disabled map e.g. { "testId1": true, "testId2": true }
+  const [disabledTests, setDisabledTests] = useState(() => {
+    try {
+      const raw = localStorage.getItem("disabledTests");
+      if (!raw) return {};
+      return JSON.parse(raw) || {};
+    } catch {
+      return {};
+    }
+  });
 
   // tick for countdowns & auto-status updates
   const [, setTick] = useState(0);
+
+  const persistDisabledTests = (obj) => {
+    try {
+      localStorage.setItem("disabledTests", JSON.stringify(obj || {}));
+    } catch (e) {
+      console.warn("Could not persist disabledTests", e);
+    }
+  };
 
   const loadAll = useCallback(
     async (signal) => {
@@ -272,7 +290,7 @@ export default function StudentDashboard() {
       });
       socketRef.current = socket;
 
-      const course = localStorage.getItem("studentCourseName");
+      const course = localStorage.getItem("branch");
       if (course) socket.emit("joinAudience", course);
 
       socket.on("testCreated", (payload) => {
@@ -338,23 +356,34 @@ export default function StudentDashboard() {
     return instituteMatch && courseMatch;
   }
 
+  // MODIFIED: Start button only enabled when test has started (now >= startMs)
   function startButtonState(task) {
     const { startMs, endMs } = parseTaskTimes(task);
     const now = Date.now();
-    if (!isFinite(startMs)) return { enabled: false, label: "Start Test", remainingMs: NaN, isOngoing: false };
 
-    if ((!isFinite(endMs) && now >= startMs) || (isFinite(endMs) && now >= startMs && now < endMs)) {
+    if (!isFinite(startMs)) {
+      return { enabled: false, label: "Start Test", remainingMs: NaN, isOngoing: false };
+    }
+
+    // Test has started: now >= startMs
+    if (now >= startMs) {
       const remaining = isFinite(endMs) ? Math.max(0, endMs - now) : 0;
-      return { enabled: true, label: `Start Test · ${formatCountdownMs(remaining)}`, remainingMs: remaining, isOngoing: true };
+      return {
+        enabled: true,
+        label: `Start Test · ${formatCountdownMs(remaining)}`,
+        remainingMs: remaining,
+        isOngoing: true,
+      };
     }
 
-    const earlyMs = 60000;
+    // Test has not started yet
     const msUntilStart = startMs - now;
-    if (msUntilStart <= earlyMs && msUntilStart > 0) {
-      return { enabled: true, label: `Start Test · ${formatCountdownMs(msUntilStart)}`, remainingMs: msUntilStart, isOngoing: false };
-    }
-
-    return { enabled: false, label: `Starts in ${formatCountdownMs(msUntilStart)}`, remainingMs: msUntilStart, isOngoing: false };
+    return {
+      enabled: false,
+      label: `Starts in ${formatCountdownMs(msUntilStart)}`,
+      remainingMs: msUntilStart,
+      isOngoing: false,
+    };
   }
 
   const sortedTasksForCurrentTab = () => {
@@ -396,16 +425,18 @@ export default function StudentDashboard() {
       : "bg-gray-200 text-gray-700 w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center";
   }
 
+  // helper to check if a test is disabled
+  const isTestDisabled = (id) => !!(disabledTests && disabledTests[id]);
+
   // When user clicks Start: set session attempt state, try request fullscreen, hide header, then navigate
   const handleStartClick = async (id) => {
-    // Do not allow start if globally disabled for this student
-    if (localStorage.getItem("startDisabled") === "true") {
-      alert("Starting tests has been disabled for your account due to repeated fullscreen exits.");
-      setStartDisabled(true);
+    // Per-test disable
+    if (isTestDisabled(id)) {
+      alert("Starting this test has been disabled for your account due to repeated fullscreen exits for this test.");
       return;
     }
 
-    // initialize attempt state in sessionStorage (so StartTest page can read it too)
+    // initialize attempt state in sessionStorage
     const attempt = { id, exitCount: 0, startedAt: Date.now() };
     try {
       sessionStorage.setItem("currentTestAttempt", JSON.stringify(attempt));
@@ -413,15 +444,14 @@ export default function StudentDashboard() {
       console.warn("Could not write sessionStorage", e);
     }
 
-    // hide header immediately (user asked header removed on click)
+    // hide header immediately
     setIsFullscreen(true);
 
-    // request fullscreen (best-effort). Many browsers require this to be triggered directly by user action.
+    // request fullscreen (best-effort)
     let enteredFs = false;
     try {
       if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
         const p = document.documentElement.requestFullscreen();
-        // await the promise but timeout quickly in case browser doesn't resolve
         await Promise.race([p || Promise.resolve(), new Promise((res) => setTimeout(res, 300))]);
         enteredFs = !!document.fullscreenElement;
       }
@@ -431,25 +461,21 @@ export default function StudentDashboard() {
     }
 
     if (!enteredFs) {
-      // inform user to enter fullscreen on the next page if the browser blocked auto fullscreen
       alert(
         "Your browser blocked automatic fullscreen. When the test page opens, click the 'Enter Fullscreen' button there. " +
-        "Exiting fullscreen during the test will show warnings and after 3 exits the test will be closed and Start will be disabled."
+        "Exiting fullscreen during the test will show warnings and after 3 exits the test will be closed and that test will be disabled."
       );
     }
 
-    // navigate to test page (same-tab route)
-navigate(`/startTest/${id}`, { state: { hideHeader: true } });
+    navigate(`/startTest/${id}`, { state: { hideHeader: true } });
   };
 
-  // handle fullscreenchange globally while this dashboard is mounted.
-  // We detect exits and increment session attempt counter. After 3 exits we disable the start button.
+  // handle fullscreenchange globally
   useEffect(() => {
     function onFullscreenChange() {
       const fsElement = document.fullscreenElement;
       setIsFullscreen(!!fsElement);
 
-      // If there is an active attempt recorded in sessionStorage, update it
       try {
         const raw = sessionStorage.getItem("currentTestAttempt");
         if (!raw) return;
@@ -457,24 +483,22 @@ navigate(`/startTest/${id}`, { state: { hideHeader: true } });
         if (!attempt || !attempt.id) return;
 
         if (!fsElement) {
-          // user has left fullscreen — increment exitCount
           attempt.exitCount = (attempt.exitCount || 0) + 1;
           sessionStorage.setItem("currentTestAttempt", JSON.stringify(attempt));
 
           if (attempt.exitCount >= 3) {
-            // punish: close test and disable start
-            localStorage.setItem("startDisabled", "true");
-            setStartDisabled(true);
+            setDisabledTests((prev) => {
+              const next = { ...(prev || {}), [attempt.id]: true };
+              persistDisabledTests(next);
+              return next;
+            });
 
-            // cleanup and redirect to student dashboard root
             sessionStorage.removeItem("currentTestAttempt");
             setIsFullscreen(false);
-            alert("You have exited fullscreen 3 times. The test has been closed and starting tests has been disabled for your account.");
-            navigate("/"); // redirect to home/dashboard root
+            alert("You have exited fullscreen 3 times. This test has been closed and it has been disabled for your account.");
+            navigate("/");
           } else {
             alert(`You exited fullscreen. Attempt ${attempt.exitCount} of 3. Do not exit fullscreen during the test.`);
-            // try to re-request fullscreen (best-effort). Only works as user gesture in many browsers.
-            // We do not force navigation here — StartTest page should also remind the user to re-enter fullscreen.
             try {
               if (document.documentElement.requestFullscreen) {
                 document.documentElement.requestFullscreen().catch(() => { });
@@ -492,19 +516,40 @@ navigate(`/startTest/${id}`, { state: { hideHeader: true } });
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
   }, [navigate]);
 
-  // If localStorage flag changed elsewhere, keep state in sync (simple poll)
+  // sync disabledTests if localStorage changes in other tabs/windows
+  useEffect(() => {
+    function onStorage(e) {
+      if (e.key !== "disabledTests") return;
+      try {
+        const parsed = e.newValue ? JSON.parse(e.newValue) : {};
+        setDisabledTests(parsed || {});
+      } catch {
+        // ignore parse error
+      }
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  // periodic poll to pick up external changes
   useEffect(() => {
     const id = setInterval(() => {
-      const v = localStorage.getItem("startDisabled") === "true";
-      if (v !== startDisabled) setStartDisabled(v);
-    }, 1000);
+      try {
+        const raw = localStorage.getItem("disabledTests");
+        const parsed = raw ? JSON.parse(raw) : {};
+        const a = JSON.stringify(parsed || {});
+        const b = JSON.stringify(disabledTests || {});
+        if (a !== b) setDisabledTests(parsed || {});
+      } catch {
+        // ignore
+      }
+    }, 2000);
     return () => clearInterval(id);
-  }, [startDisabled]);
+  }, [disabledTests]);
 
   return (
     <div className="flex min-h-screen bg-gray-50">
       <main className="flex-1 flex flex-col">
-        {/* remove header when isFullscreen true */}
         {!isFullscreen && (
           <header className="w-full bg-white border-b px-6 py-4 flex items-center justify-between shadow-sm">
             <h1 className="text-2xl font-bold text-gray-800">Assessments</h1>
@@ -571,7 +616,9 @@ navigate(`/startTest/${id}`, { state: { hideHeader: true } });
                         : {};
 
                     const btnState = startButtonState(task);
-                    const enabledGlobally = btnState.enabled && !startDisabled;
+                    const disabledForThisTest = isTestDisabled(id);
+                    const enabledGlobally = btnState.enabled && !disabledForThisTest;
+
                     const btnClass = enabledGlobally
                       ? "flex-1 flex items-center justify-center gap-2 py-3 text-base font-medium text-white bg-sky-600 hover:bg-sky-700"
                       : "flex-1 flex items-center justify-center gap-2 py-3 text-base font-medium text-gray-400 bg-gray-200 cursor-not-allowed";
@@ -638,8 +685,8 @@ navigate(`/startTest/${id}`, { state: { hideHeader: true } });
                               className={btnClass}
                               onClick={() => {
                                 if (!enabledGlobally) {
-                                  if (startDisabled) {
-                                    alert("Starting tests is disabled for your account due to repeated fullscreen exits.");
+                                  if (disabledForThisTest) {
+                                    alert("Starting this test is disabled for your account due to repeated fullscreen exits for this test.");
                                   }
                                   return;
                                 }
