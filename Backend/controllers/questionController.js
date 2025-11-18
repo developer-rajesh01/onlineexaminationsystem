@@ -1,47 +1,26 @@
+// controllers/questionController.js
 // import Question from "../models/Question.js";
-
-// export const bulkAddQuestions = async (req, res) => {
-//   try {
-//     console.log("bulkAddQuestions - headers:", req.headers);
-//     console.log("bulkAddQuestions - body:", JSON.stringify(req.body).slice(0, 2000));
-
-//     if (!req.body || !Array.isArray(req.body.questions) || req.body.questions.length === 0) {
-//       return res.status(400).json({ message: "No questions provided in body" });
-//     }
-
-//     const formatted = req.body.questions.map(q => ({
-//       questionText: q.questionText || "",
-//       options: (q.options || []).slice(0, 4).map(opt => ({ text: String(opt || "") })),
-//       correctAnswerIndex: Number.isFinite(q.correctAnswerIndex) ? q.correctAnswerIndex : 0,
-//     }));
-
-//     const saved = await Question.insertMany(formatted);
-//     return res.status(201).json({ message: `${saved.length} questions saved`, data: saved });
-//   } catch (err) {
-//     console.error("bulkAddQuestions error:", err);
-//     return res.status(500).json({ message: "Server error", error: err.message });
-//   }
-// };
-
-// export const getAllQuestions = async (req, res) => {
-//   try {
-//     const questions = await Question.find();
-//     res.json(questions);
-//   } catch (err) {
-//     res.status(500).json({ message: err.message });
-//   }
-// };
-
-// -----------------------------------
-
-
-// // controllers/questionController.js
-// import Question from "../models/Question.js"; // adjust path
 // import mongoose from "mongoose";
+
+// function normalizeOptions(options) {
+//   // Ensure we always return an array of strings
+//   if (!options && options !== 0) return [];
+//   if (Array.isArray(options)) {
+//     return options.map((o) => (o === null || o === undefined ? "" : String(o).trim()));
+//   }
+//   // If it's a string like "A, B, C" or "A" -> split by comma if comma present, else single element array
+//   const s = String(options);
+//   if (s.includes(",")) {
+//     return s
+//       .split(",")
+//       .map((x) => x.trim())
+//       .filter(Boolean);
+//   }
+//   return [s.trim()].filter(Boolean);
+// }
 
 // export const bulkAddQuestions = async (req, res, next) => {
 //   try {
-//     // debug logs (temporary)
 //     console.log("bulkAddQuestions body:", req.body);
 //     console.log("bulkAddQuestions user:", req.user);
 
@@ -55,17 +34,17 @@
 //     const uploaderName = req.user?.name || req.body?.uploaderName || null;
 //     const uploaderId = req.user?._id || null;
 
-//     // Use provided batchId or create one server-side
+//     // server-side batchId if not provided
 //     const batchId =
 //       req.body?.batchId ||
 //       `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-//     // Map incoming questions -> DB shape (add metadata)
+//     // Normalize and map
 //     const docs = incoming.map((q) => {
-//       // sanitize/normalize q.options etc as you like
+//       const opts = normalizeOptions(q.options);
 //       return {
-//         questionText: q.questionText || "",
-//         options: q.options || [],
+//         questionText: q.questionText ? String(q.questionText).trim() : "",
+//         options: opts,
 //         correctAnswerIndex:
 //           typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0,
 //         batchId,
@@ -75,7 +54,14 @@
 //       };
 //     });
 
-//     // Save all at once
+//     // Optional: basic validation server-side
+//     const invalid = docs.findIndex((d) => !d.questionText || d.options.length < 2);
+//     if (invalid !== -1) {
+//       return res
+//         .status(400)
+//         .json({ message: `Invalid question at index ${invalid}: need text and ≥2 options` });
+//     }
+
 //     const created = await Question.insertMany(docs);
 
 //     return res.status(201).json({
@@ -89,84 +75,66 @@
 //     next(err);
 //   }
 // };
+//getAllQuestions remains unchanged
 
 
-
-// //getAllQuestions remains unchanged
-// export const getAllQuestions = async (req, res) => {
-//   try {
-//     const questions = await Question.find();
-//     res.json(questions);
-//   } catch (err) {
-//     res.status(500).json({ message: err.message });
-//   }
-// };
-
-// -------------------------------------------
 // controllers/questionController.js
 import Question from "../models/Question.js";
 import mongoose from "mongoose";
 
-function normalizeOptions(options) {
-  // Ensure we always return an array of strings
-  if (!options && options !== 0) return [];
-  if (Array.isArray(options)) {
-    return options.map((o) => (o === null || o === undefined ? "" : String(o).trim()));
-  }
-  // If it's a string like "A, B, C" or "A" -> split by comma if comma present, else single element array
-  const s = String(options);
-  if (s.includes(",")) {
-    return s
-      .split(",")
-      .map((x) => x.trim())
-      .filter(Boolean);
-  }
-  return [s.trim()].filter(Boolean);
-}
-
 export const bulkAddQuestions = async (req, res, next) => {
   try {
-    console.log("bulkAddQuestions body:", req.body);
-    console.log("bulkAddQuestions user:", req.user);
+    console.log("bulkAddQuestions body:", JSON.stringify(req.body, null, 2));
+    console.log("bulkAddQuestions user:", req.user && { id: req.user._id, email: req.user?.email, name: req.user?.name });
 
     const incoming = req.body?.questions;
     if (!incoming || !Array.isArray(incoming) || incoming.length === 0) {
       return res.status(400).json({ message: "No questions provided" });
     }
 
-    // Prefer authenticated user (req.user) if present
+    // get uploader info (prefer authenticated user)
     const uploaderEmail = req.user?.email || req.body?.uploaderEmail || null;
     const uploaderName = req.user?.name || req.body?.uploaderName || null;
-    const uploaderId = req.user?._id || null;
 
-    // server-side batchId if not provided
+    // Safely determine uploaderId:
+    let uploaderId = null;
+    if (req.user?._id) {
+      // If req.user is a mongoose doc, this _id is already an ObjectId
+      uploaderId = req.user._id;
+    } else if (req.body?.uploaderId) {
+      // If client passed a string id, validate then construct with `new`
+      const maybe = req.body.uploaderId;
+      if (mongoose.Types.ObjectId.isValid(maybe)) {
+        uploaderId = new mongoose.Types.ObjectId(maybe); // === USE `new` HERE
+      } else {
+        uploaderId = null;
+      }
+    }
+
+    // use provided batchId or make a server-side one
     const batchId =
       req.body?.batchId ||
       `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    // Normalize and map
-    const docs = incoming.map((q) => {
-      const opts = normalizeOptions(q.options);
+    // Build docs ensuring options is an array (avoid invalid casts)
+    const docs = incoming.map((q, idx) => {
+      const opts = Array.isArray(q.options)
+        ? q.options
+        : // if it's a comma-separated string, you might want to split it:
+          (typeof q.options === "string" ? q.options.split(",").map(s => s.trim()).filter(Boolean) : []);
+
       return {
-        questionText: q.questionText ? String(q.questionText).trim() : "",
+        questionText: q.questionText || "",
         options: opts,
-        correctAnswerIndex:
-          typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0,
+        correctAnswerIndex: typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0,
         batchId,
         uploadedByEmail: uploaderEmail,
         uploadedByName: uploaderName,
-        uploadedBy: uploaderId ? mongoose.Types.ObjectId(uploaderId) : null,
+        uploadedBy: uploaderId || null,
       };
     });
 
-    // Optional: basic validation server-side
-    const invalid = docs.findIndex((d) => !d.questionText || d.options.length < 2);
-    if (invalid !== -1) {
-      return res
-        .status(400)
-        .json({ message: `Invalid question at index ${invalid}: need text and ≥2 options` });
-    }
-
+    // Insert many
     const created = await Question.insertMany(docs);
 
     return res.status(201).json({
@@ -176,11 +144,15 @@ export const bulkAddQuestions = async (req, res, next) => {
       createdIds: created.map((d) => d._id),
     });
   } catch (err) {
-    console.error("bulkAddQuestions error:", err);
-    next(err);
+    // If the ObjectId error still appears we'll get full stack here
+    console.error("bulkAddQuestions error:", err && (err.stack || err.message || err));
+    // Surface message to client (for dev). In production don't leak stack.
+    return res.status(500).json({ message: err.message || "Server error" });
   }
 };
-//getAllQuestions remains unchanged
+
+
+
 export const getAllQuestions = async (req, res) => {
   try { 
     const questions = await Question.find();
