@@ -260,10 +260,13 @@ function Layout() {
     }
 
     // === Student Layout ===
+    // === Student Layout ===
     if (role === "student") {
+        const hideHeader = !!(location.state && location.state.hideHeader);
+
         return (
             <>
-                <StudentHeader />
+                {!hideHeader && <StudentHeader />}
                 <main className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-6">
                     <div className="max-w-7xl mx-auto">
                         <Outlet />
@@ -272,6 +275,7 @@ function Layout() {
             </>
         );
     }
+
 
     // === Fallback ===
     return null;

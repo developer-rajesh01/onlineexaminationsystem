@@ -27,6 +27,7 @@ function LoginPage() {
         localStorage.setItem("name", res.data.user.name);
         localStorage.setItem("email", res.data.user.email);
         localStorage.setItem("institute", res.data.user.institute);
+<<<<<<< HEAD
 
         // ↓↓↓ IMPORTANT: store the keys your Questions component expects ↓↓↓
         localStorage.setItem("userEmail", res.data.user.email || "");
@@ -41,6 +42,9 @@ function LoginPage() {
         // optional: store whole user JSON for convenience
         localStorage.setItem("user", JSON.stringify(res.data.user || {}));
 
+=======
+        localStorage.setItem("branch", res.data.user.branchBatch);
+>>>>>>> aceca0977cc0dcd81601cf7639a24b6d65cf6d9f
         setMessage("✅ Login successful! Redirecting...");
         setLoading(false);
 
@@ -95,9 +99,8 @@ function LoginPage() {
 
             {message && (
               <p
-                className={`text-center mb-4 font-medium ${
-                  message.includes("✅") ? "text-green-600" : "text-red-600"
-                }`}
+                className={`text-center mb-4 font-medium ${message.includes("✅") ? "text-green-600" : "text-red-600"
+                  }`}
               >
                 {message}
               </p>
@@ -106,11 +109,10 @@ function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className={`w-full py-3 rounded-xl font-semibold text-white shadow-md transition ${
-                loading
+              className={`w-full py-3 rounded-xl font-semibold text-white shadow-md transition ${loading
                   ? "bg-gray-400 cursor-not-allowed"
                   : "bg-indigo-600 hover:bg-indigo-700"
-              }`}
+                }`}
             >
               {loading ? "Logging in..." : "Login"}
             </button>

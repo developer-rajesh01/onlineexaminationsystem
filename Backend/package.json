@@ -3,11 +3,12 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+ "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "type": "module"
+    
   },
   "keywords": [],
   "author": "",
@@ -20,7 +21,11 @@
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.20.0",
     "mongoose": "^8.19.1",
+<<<<<<< HEAD
     "multer": "^2.0.2",
+=======
+    "node-cron": "^4.2.1",
+>>>>>>> aceca0977cc0dcd81601cf7639a24b6d65cf6d9f
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "uuid": "^13.0.0"
