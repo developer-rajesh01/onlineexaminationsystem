@@ -23,8 +23,9 @@ function FacultySidebar({ selectedSection, onSelect }) {
     const menuItems = [
         { label: "Dashboard", to: "/dashboard", icon: HiOutlineViewGrid },
         { label: "Create Test", to: "/createTest", icon: HiOutlineClipboardList },
-        { label: "Questions", to: "/questions", icon: HiOutlineQuestionMarkCircle },
         { label: "Scoreboard", to: "/scoreboard", icon: HiOutlineChartBar },
+        { label: "Questions", to: "/questions", icon: HiOutlineQuestionMarkCircle },
+       
     ];
 
     return (
@@ -99,7 +100,7 @@ function StudentHeader() {
             <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
                 <Link to="/" className="flex items-center space-x-2">
                     <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center">
-                        <span className="text-indigo-600 font-bold text-xl">L</span>
+                        <span className="text-indigo-600 font-bold text-xl">O</span>
                     </div>
                     <span className="text-2xl font-bold">ExamPortal</span>
                 </Link>

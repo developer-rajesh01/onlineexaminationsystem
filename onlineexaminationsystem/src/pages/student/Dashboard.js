@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
 import {
@@ -165,6 +165,8 @@ export default function StudentDashboard() {
   const navigate = useNavigate();
   const studentCourseName = localStorage.getItem("branch") || "";
   const studentInstituteName = localStorage.getItem("institute") || "";
+  const studentEmail = localStorage.getItem("email") || "";
+  const authToken = localStorage.getItem("token") || "";
 
   const [tab, setTab] = useState("active");
   const [allTasks, setAllTasks] = useState([]);
@@ -173,6 +175,7 @@ export default function StudentDashboard() {
   const [errorMsg, setErrorMsg] = useState("");
   const socketRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
+  const [attemptByTestId, setAttemptByTestId] = useState({});
 
   // per-test disabled map e.g. { "testId1": true, "testId2": true }
   const [disabledTests, setDisabledTests] = useState(() => {
@@ -187,6 +190,61 @@ export default function StudentDashboard() {
 
   // tick for countdowns & auto-status updates
   const [, setTick] = useState(0);
+
+  // Load student attempts to decide "Start" / "View report" / "Not attempted"
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!studentEmail || !authToken) {
+          setAttemptByTestId({});
+          return;
+        }
+
+        const res = await fetch(`http://localhost:5000/api/attempts?email=${encodeURIComponent(studentEmail)}`, {
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            'Content-Type': 'application/json'
+          },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.json().catch(() => ({}));
+        const attempts = Array.isArray(body?.attempts) ? body.attempts : Array.isArray(body) ? body : [];
+
+        const map = {};
+
+        attempts.forEach((a) => {
+          if (!a?.testId) return;
+
+          // ✅ FIXED: Correct testId extraction
+          let testId = String(a.testId);
+          if (a.testId && typeof a.testId === 'object' && a.testId._id) {
+            testId = String(a.testId._id);
+          }
+
+          const prev = map[testId];
+          const prevTs = prev?.submittedAt || prev?.startedAt || 0;
+          const nextTs = a?.submittedAt || a?.startedAt || 0;
+
+          if (!prev || new Date(nextTs) > new Date(prevTs)) {
+            map[testId] = a;
+          }
+        });
+
+        if (!cancelled) {
+          console.log("✅ Loaded attempts:", Object.keys(map).length); // DEBUG
+          setAttemptByTestId(map);
+        }
+      } catch (e) {
+        if (!cancelled) setAttemptByTestId({});
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [studentEmail, authToken]);
+
 
   const persistDisabledTests = (obj) => {
     try {
@@ -385,8 +443,8 @@ export default function StudentDashboard() {
       isOngoing: false,
     };
   }
-
-  const sortedTasksForCurrentTab = () => {
+  // 1. Memoized filtered + sorted tasks
+  const sortedTasksForCurrentTab = useMemo(() => {
     const filtered = allTasks
       .filter((t) => matchesStudentTest(t))
       .filter((t) => {
@@ -403,15 +461,38 @@ export default function StudentDashboard() {
     others.sort((a, b) => (parseTaskTimes(a).startMs || 0) - (parseTaskTimes(b).startMs || 0));
 
     return [...ongoing, ...others];
-  };
+  }, [allTasks, tab, matchesStudentTest])
+  // 2. Memoized pagination (depends on sortedTasksForCurrentTab)
+  const paginatedData = useMemo(() => {
+    const tasks = sortedTasksForCurrentTab;
+    const total = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE));
+    const currentPageTasks = tasks.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+    return { tasks, totalPages: total, pageTasks: currentPageTasks };
+  }, [sortedTasksForCurrentTab, page]);
 
-  const totalPages = Math.max(1, Math.ceil(sortedTasksForCurrentTab().length / PAGE_SIZE));
-  const pageTasks = sortedTasksForCurrentTab().slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const { pageTasks, totalPages } = paginatedData;
+  // ✅ SAFE: Only memoizes badge counts (no dependencies issues)
+  const badgeCounts = useMemo(() => {
+    let active = 0;
+    let completed = 0;
 
-  const badgeCountActive = () =>
-    allTasks.filter((t) => matchesStudentTest(t) && ACTIVE_VARIANTS.has((t.status || "").toLowerCase())).length;
-  const badgeCountCompleted = () =>
-    allTasks.filter((t) => matchesStudentTest(t) && COMPLETED_VARIANTS.has((t.status || "").toLowerCase())).length;
+    allTasks.forEach((t) => {
+      if (!t.institute || !t.courseName) return;
+      if (String(t.institute).toLowerCase() !== studentInstituteName.toLowerCase()) return;
+
+      const audiences = String(t.courseName).split(",").map(a => a.trim().toLowerCase()).filter(Boolean);
+      if (!audiences.includes(studentCourseName.toLowerCase())) return;
+
+      const s = (t.status || "").toLowerCase();
+      if (ACTIVE_VARIANTS.has(s)) active++;
+      if (COMPLETED_VARIANTS.has(s)) completed++;
+    });
+
+    return { active, completed };
+  }, [allTasks, studentCourseName, studentInstituteName]);
+
+  const badgeCountActive = () => badgeCounts.active;
+  const badgeCountCompleted = () => badgeCounts.completed;
 
   function tabButtonClass(key, active) {
     const base = "relative flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all";
@@ -429,48 +510,83 @@ export default function StudentDashboard() {
   const isTestDisabled = (id) => !!(disabledTests && disabledTests[id]);
 
   // When user clicks Start: set session attempt state, try request fullscreen, hide header, then navigate
-  const handleStartClick = async (id) => {
-    // Per-test disable
+  const handleStartClick = useCallback(async (id) => {
+    // 1️⃣ Per-test disable check
     if (isTestDisabled(id)) {
-      alert("Starting this test has been disabled for your account due to repeated fullscreen exits for this test.");
+      alert("Test disabled due to repeated fullscreen exits.");
       return;
     }
 
-    // initialize attempt state in sessionStorage
-    const attempt = { id, exitCount: 0, startedAt: Date.now() };
     try {
-      sessionStorage.setItem("currentTestAttempt", JSON.stringify(attempt));
-    } catch (e) {
-      console.warn("Could not write sessionStorage", e);
-    }
+      // 2️⃣ ✅ CALL NEW API ENDPOINT FIRST
+      const studentEmail = localStorage.getItem("email");
+      const token = localStorage.getItem("token");
 
-    // hide header immediately
-    setIsFullscreen(true);
-
-    // request fullscreen (best-effort)
-    let enteredFs = false;
-    try {
-      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-        const p = document.documentElement.requestFullscreen();
-        await Promise.race([p || Promise.resolve(), new Promise((res) => setTimeout(res, 300))]);
-        enteredFs = !!document.fullscreenElement;
+      if (!studentEmail || !token) {
+        alert("Please login first");
+        return;
       }
-    } catch (err) {
-      console.warn("Fullscreen request failed or blocked:", err);
-      enteredFs = false;
-    }
 
-    if (!enteredFs) {
-      alert(
-        "Your browser blocked automatic fullscreen. When the test page opens, click the 'Enter Fullscreen' button there. " +
-        "Exiting fullscreen during the test will show warnings and after 3 exits the test will be closed and that test will be disabled."
-      );
-    }
+      console.log("🚀 Starting attempt for test:", id);
 
-    navigate(`/startTest/${id}`, { state: { hideHeader: true } });
-  };
+      const response = await fetch(`http://localhost:5000/api/attempts/${id}/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ studentEmail }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to start test');
+      }
+
+      const data = await response.json();
+      const attemptId = data.attemptId;
+      console.log("✅ Attempt created:", attemptId);
+
+      // 3️⃣ Store attemptId in sessionStorage
+      const attempt = {
+        testId: id,
+        attemptId,
+        exitCount: 0,
+        startedAt: Date.now()
+      };
+      sessionStorage.setItem("currentTestAttempt", JSON.stringify(attempt));
+
+      // 4️⃣ Fullscreen + Navigate
+      setIsFullscreen(true);
+
+      // Request fullscreen
+      try {
+        if (document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch (err) {
+        console.warn("Fullscreen blocked:", err);
+      }
+      
+  
+      // 5️⃣ Navigate with attemptId
+      navigate(`/test/${id}`, {
+        state: {
+          hideHeader: true,
+          attemptId,  // Pass attemptId to test page
+          testId: id
+        }
+      });
+
+    } catch (error) {
+      console.error("❌ Start test failed:", error);
+      alert(`Failed to start test: ${error.message}`);
+    }
+  }, [navigate]);
+
 
   // handle fullscreenchange globally
+  // FIXED Fullscreen handler
   useEffect(() => {
     function onFullscreenChange() {
       const fsElement = document.fullscreenElement;
@@ -478,9 +594,10 @@ export default function StudentDashboard() {
 
       try {
         const raw = sessionStorage.getItem("currentTestAttempt");
+
         if (!raw) return;
         const attempt = JSON.parse(raw);
-        if (!attempt || !attempt.id) return;
+        if (!attempt || !attempt.attemptId) return;
 
         if (!fsElement) {
           attempt.exitCount = (attempt.exitCount || 0) + 1;
@@ -488,7 +605,7 @@ export default function StudentDashboard() {
 
           if (attempt.exitCount >= 3) {
             setDisabledTests((prev) => {
-              const next = { ...(prev || {}), [attempt.id]: true };
+              const next = { ...(prev || {}), [attempt.testId]: true };
               persistDisabledTests(next);
               return next;
             });
@@ -617,14 +734,17 @@ export default function StudentDashboard() {
 
                     const btnState = startButtonState(task);
                     const disabledForThisTest = isTestDisabled(id);
-                    const enabledGlobally = btnState.enabled && !disabledForThisTest;
+                    const attemptForThisTest = attemptByTestId[String(id)];
+                    const hasAnyAttempt = !!attemptForThisTest;
+                    const hasSubmittedAttempt = (attemptForThisTest?.status || "").toString().toLowerCase() === "submitted";
+                    const enabledGlobally = btnState.enabled && !disabledForThisTest && !hasAnyAttempt;
 
                     const btnClass = enabledGlobally
                       ? "flex-1 flex items-center justify-center gap-2 py-3 text-base font-medium text-white bg-sky-600 hover:bg-sky-700"
-                      : "flex-1 flex items-center justify-center gap-2 py-3 text-base font-medium text-gray-400 bg-gray-200 cursor-not-allowed";
-
+                      : "flex-1 flex items-center justify-center gap-2 py-3 text-base font-medium text-gray-500 bg-gray-200 cursor-not-allowed";
                     const { startMs, endMs } = parseTaskTimes(task);
                     const now = Date.now();
+                    const isTestOver = isFinite(endMs) && now >= endMs;
                     const remainingForLive = isFinite(endMs) ? Math.max(0, endMs - now) : null;
 
                     return (
@@ -638,6 +758,25 @@ export default function StudentDashboard() {
                             Live
                           </div>
                         )}
+                        {hasSubmittedAttempt && (
+                          <div className="absolute top-3 right-3 bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full text-xs font-semibold z-10 ml-[-70px]">
+                            Submitted
+                          </div>
+                        )}
+
+
+                        {!hasSubmittedAttempt && hasAnyAttempt && (
+                          <div className="absolute top-3 right-3 bg-amber-100 text-amber-800 px-2 py-1 rounded-full text-xs font-semibold z-10 ml-[-70px]">
+                            started
+                          </div>
+                        )}
+                        {/* "MISSED" BADGE - ADD HERE */}
+                        {isCompleted && !hasAnyAttempt && (
+                          <div className="absolute top-3 right-3 bg-gray-100 text-gray-700 px-2 py-1 rounded-full text-xs font-semibold z-10">
+                            Missed
+                          </div>
+                        )}
+
 
                         <div className="p-5 pb-2 flex flex-col min-h-[140px] justify-between">
                           <h3
@@ -666,50 +805,51 @@ export default function StudentDashboard() {
                           </div>
                         </div>
 
+
+
                         <div className="flex border-t bg-gray-100">
-                          {isCompleted ? (
-                            <NavLink
-                              to={`/viewReport/${id}`}
-                              className="flex-1 flex items-center justify-center py-3 text-base font-medium text-sky-600"
-                              style={{
-                                background: "#EFF6FF",
-                                color: "#2C6CD6",
-                                borderBottomLeftRadius: "1rem",
-                                borderBottomRightRadius: "1rem",
-                              }}
-                            >
-                              View Report
-                            </NavLink>
+                          {tab === "completed" ? (
+
+                            hasAnyAttempt ? (
+                              <button
+                                className="flex-1 flex items-center justify-center py-3 text-base font-medium text-sky-700 bg-sky-50 hover:bg-sky-100 transition"
+                                onClick={() => navigate("/student/scoreboard", { state: { openAttemptId: attemptForThisTest?._id } })}
+                                style={{ borderBottomLeftRadius: "1rem", borderBottomRightRadius: "1rem" }}
+                              >
+                                View report
+                              </button>
+                            ) : (
+                              <div className="flex-1 flex items-center justify-center py-3 text-base font-medium text-gray-500 bg-gray-100" style={{ borderBottomLeftRadius: "1rem", borderBottomRightRadius: "1rem" }}>
+                                Not attempted
+                              </div>
+                            )
                           ) : (
                             <button
-                              className={btnClass}
+                              className={
+                                enabledGlobally
+                                  ? "flex-1 flex items-center justify-center gap-2 py-3 text-base font-medium text-white bg-sky-600 hover:bg-sky-700"
+                                  : "flex-1 flex items-center justify-center gap-2 py-3 text-base font-medium text-gray-500 bg-gray-200 cursor-not-allowed"
+                              }
                               onClick={() => {
-                                if (!enabledGlobally) {
-                                  if (disabledForThisTest) {
-                                    alert("Starting this test is disabled for your account due to repeated fullscreen exits for this test.");
-                                  }
-                                  return;
-                                }
+                                if (!enabledGlobally) return;
                                 handleStartClick(id);
                               }}
                               disabled={!enabledGlobally}
-                              style={{
-                                borderBottomLeftRadius: "1rem",
-                                borderBottomRightRadius: "1rem",
-                              }}
+                              style={{ borderBottomLeftRadius: "1rem", borderBottomRightRadius: "1rem" }}
                             >
-                              <span>{enabledGlobally ? "Start Test" : btnState.label}</span>
-
+                              <span>{enabledGlobally ? "Start test" : btnState.label}</span>
                               {isOngoing && remainingForLive !== null && remainingForLive > 0 && (
                                 <span className="ml-2 text-sm opacity-90">{formatCountdownMs(remainingForLive)}</span>
                               )}
-
                               {!isOngoing && !btnState.enabled && btnState.remainingMs > 0 && (
                                 <span className="ml-2 text-sm opacity-90">{formatCountdownMs(btnState.remainingMs)}</span>
                               )}
                             </button>
                           )}
                         </div>
+
+
+
                       </article>
                     );
                   })}
@@ -717,7 +857,8 @@ export default function StudentDashboard() {
               )}
             </div>
 
-            {sortedTasksForCurrentTab().length > PAGE_SIZE && (
+
+            {paginatedData.tasks.length > PAGE_SIZE && (
               <nav className="flex items-center justify-center gap-2 px-6 py-4 border-t">
                 <button
                   onClick={() => setPage((p) => Math.max(p - 1, 0))}

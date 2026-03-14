@@ -1,9 +1,12 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Menu, AlertCircle, Clock, LogOut, CheckCircle, Circle } from "lucide-react";
+import { AlertCircle, Clock, CheckCircle, Circle } from "lucide-react";
 
 const SESSION_KEY = "currentTestAttempt";
 const START_DISABLED_KEY = "startDisabled";
+
+// const [showSections, setShowSections] = useState(true);
+// const [termsAgreed, setTermsAgreed] = useState(false);
 
 function pad(n) {
     return String(n).padStart(2, "0");
@@ -144,6 +147,8 @@ export default function SecureTestPage() {
     const { attemptId } = useParams();
     const navigate = useNavigate();
 
+
+
     const [attempt, setAttempt] = useState(null);
     const [test, setTest] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -159,15 +164,182 @@ export default function SecureTestPage() {
     const [exitCount, setExitCount] = useState(0);
     const [tabSwitchCount, setTabSwitchCount] = useState(0);
     const [headerVisible, setHeaderVisible] = useState(true);
-    const [backPressCount, setBackPressCount] = useState(0);
     const [headerPermanentlyHidden, setHeaderPermanentlyHidden] = useState(false);
-
+    const [completedSections, setCompletedSections] = useState({});
+    const sections = useMemo(() => {
+        return (test?.questions || []).reduce((acc, q, qIndex) => {
+            const s = q.section || "Default";
+            if (!acc[s]) acc[s] = [];
+            acc[s].push(qIndex);
+            return acc;
+        }, {});
+    }, [test])
     const tickRef = useRef(null);
     const submittingRef = useRef(false);
     const mountedRef = useRef(true);
     const fullscreenEnteredRef = useRef(false);
     const hideHeaderTimeout = useRef(null);
+    // 🟢 SESSION LOADER - TOP LEVEL (BEFORE ALL IFs)
 
+    useEffect(() => {
+
+        const blockKeys = (e) => {
+
+            const key = e.key.toLowerCase();
+
+            if (
+                e.key === "F12" ||
+                (e.ctrlKey && ["u", "s", "p", "t", "n", "w"].includes(key)) ||
+                (e.ctrlKey && e.shiftKey && ["i", "j", "c"].includes(key))
+            ) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log("Shortcut blocked:", e.key);
+            }
+
+        };
+
+        document.addEventListener("keydown", blockKeys, true);
+
+        return () => {
+            document.removeEventListener("keydown", blockKeys, true);
+        };
+
+    }, []);
+    useEffect(() => {
+        // 🟢 LOAD COMPLETED SECTIONS FROM LOCALSTORAGE
+        try {
+            const completedKey = `attempt_${attemptId}_completed_sections`;
+            const saved = localStorage.getItem(completedKey);
+            if (saved) {
+                setCompletedSections(JSON.parse(saved));
+            }
+        } catch (e) { }
+
+        // 🟢 EXISTING SESSION LOADER
+        const pendingKey = `attempt_${attemptId}_pending_session`;
+        const pendingData = localStorage.getItem(pendingKey);
+        if (pendingData) {
+            try {
+                const sessionData = JSON.parse(pendingData);
+                if (sessionData.attemptId === attemptId) {
+                    const loadedAnswers = {};
+                    sessionData.answers.forEach(ans => loadedAnswers[ans.qIndex] = ans.selectedIdx);
+                    setLocalAnswers(prev => ({ ...prev, ...loadedAnswers }));
+                }
+            } catch (e) { }
+        }
+    }, [attemptId]);
+
+    const immediateForfeit = useCallback(async (reason) => {
+        if (submittingRef.current || !attempt || !test) return;  // ✅ ADDED CHECKS
+        submittingRef.current = true;
+        setBlocked(true);
+        setHeaderPermanentlyHidden(true);
+
+        try {
+            const answersArr = Object.entries(localAnswers).map(([qIndexStr, selectedIdx]) => ({
+                qIndex: Number(qIndexStr),
+                selectedIdx,
+            }));
+            await fetch(`http://localhost:5000/api/attempts/${attemptId}/submit`, {
+                method: "PUT",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ answers: answersArr, forfeit: true, reason }),
+            }).catch(() => { });
+        } catch (err) {
+            console.error("Forfeit failed", err);
+        } finally {
+            await exitFullscreen().catch(() => { });
+            localStorage.removeItem(`attempt_${attemptId}_answers`);
+            sessionStorage.removeItem(SESSION_KEY);
+            setTimeout(() => navigate("/student/dashboard"), 300);
+        }
+    }, [attemptId, localAnswers, navigate, attempt, test]);  // ✅ FIXED DEPS
+
+    const handleManualSubmit = useCallback(async (auto = false) => {
+        if (blocked || !attempt || submittingRef.current) return;
+        submittingRef.current = true;
+        // 🟢 SECTION SCREEN = SAVE ONLY CURRENT SECTION
+        if (currentSection && !auto) {
+            const sectionQuestions = sections[currentSection] || [];
+            const sectionAnswers = {};
+
+            // Filter answers for THIS SECTION ONLY
+            sectionQuestions.forEach(qIdx => {
+                if (localAnswers[qIdx] !== undefined) {
+                    sectionAnswers[qIdx] = localAnswers[qIdx];
+                }
+            });
+
+            // Save THIS SECTION to localStorage
+            const sectionKey = `attempt_${attemptId}_section_${currentSection}`;
+            localStorage.setItem(sectionKey, JSON.stringify({
+                section: currentSection,
+                questions: sectionQuestions,
+                answers: sectionAnswers,
+                timestamp: new Date().toISOString()
+            }));
+
+            alert(`✅ ${currentSection} saved! (${Object.keys(sectionAnswers).length}/${sectionQuestions.length} answered)`);
+            return;
+        }
+
+        // 🟢 QUESTIONS SCREEN = FINAL SUBMIT ALL SECTIONS
+        if (!auto && !window.confirm("Submit ALL sections?")) return;
+
+        submittingRef.current = true;
+        try {
+            // COMBINE ALL sections from localStorage + current answers
+            const allAnswers = { ...localAnswers };
+            Object.keys(sections).forEach(sectionName => {
+                const sectionKey = `attempt_${attemptId}_section_${sectionName}`;
+                const sectionData = localStorage.getItem(sectionKey);
+
+                if (sectionData) {
+                    try {
+                        const section = JSON.parse(sectionData);
+                        Object.assign(allAnswers, section.answers);
+                    } catch (e) { }
+                }
+            });
+
+            setLocalAnswers(allAnswers);
+            // FINAL SERVER SUBMIT
+            localStorage.removeItem(`attempt_${attemptId}_pending_session`);
+            Object.keys(localStorage).forEach(key => {
+                if (key.includes(`attempt_${attemptId}_section_`)) {
+                    localStorage.removeItem(key);
+                }
+            });
+
+            const res = await fetch(`http://localhost:5000/api/attempts/${attemptId}/submit`, {
+                method: "PUT", credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    answers: Object.entries(allAnswers).map(([qIndexStr, selectedIdx]) => ({
+                        qIndex: Number(qIndexStr), selectedIdx
+                    })),
+                    forfeit: false, reason: auto ? "time_up" : "manual_submit"
+                })
+            });
+
+            const body = await res.json().catch(() => ({}));
+        } catch (err) {
+            alert("❌ Submit failed");
+        } finally {
+            await exitFullscreen().catch(() => { });
+
+            sessionStorage.removeItem(SESSION_KEY);
+
+            // Force redirect to dashboard
+            setTimeout(() => {
+                navigate("/student/dashboard", { replace: true });
+                window.history.replaceState(null, "", "/student/dashboard");
+            }, 500);
+        }
+    }, [attemptId, attempt, blocked, localAnswers, navigate, currentSection, test, sections]);
     // === FORCE FULLSCREEN ON MOUNT ===
     useEffect(() => {
         const enterFullscreen = async () => {
@@ -183,22 +355,69 @@ export default function SecureTestPage() {
         };
         enterFullscreen();
     }, []);
-
-    // === EXIT FULLSCREEN → FORFEIT ===
+    // ✅ FIRST - Fullscreen exit (keep as is)
     useEffect(() => {
-        const onFullscreenChange = () => {
+        const onFullscreenChange = async () => {
             if (!getFullscreenElement()) {
-                immediateForfeit("fullscreen_exit");
+
+                if (!submittingRef.current) {
+                    await handleManualSubmit(true);
+                }
+
             } else {
                 fullscreenEnteredRef.current = true;
                 setFullscreenWarning(false);
             }
         };
-
         const events = ["fullscreenchange", "webkitfullscreenchange", "mozfullscreenchange", "MSFullscreenChange"];
         events.forEach(ev => document.addEventListener(ev, onFullscreenChange));
-
         return () => events.forEach(ev => document.removeEventListener(ev, onFullscreenChange));
+
+    }, [handleManualSubmit]);
+
+    useEffect(() => {
+
+        const escListener = async (e) => {
+
+            if (e.key === "Escape") {
+
+                console.log("ESC pressed");
+                if (!submittingRef.current) {
+                    await handleManualSubmit(true);
+                }
+
+            }
+
+        };
+
+        document.addEventListener("keydown", escListener);
+
+        return () => {
+            document.removeEventListener("keydown", escListener);
+        };
+
+    }, [handleManualSubmit]);
+    useEffect(() => {
+
+        const prevent = (e) => e.preventDefault();
+
+        document.addEventListener("copy", prevent);
+        document.addEventListener("paste", prevent);
+        document.addEventListener("cut", prevent);
+        document.addEventListener("contextmenu", prevent);
+
+        return () => {
+            document.removeEventListener("copy", prevent);
+            document.removeEventListener("paste", prevent);
+            document.removeEventListener("cut", prevent);
+            document.removeEventListener("contextmenu", prevent);
+        };
+
+    }, []);
+    // ✅ SECOND - Header hiding (NEW SEPARATE useEffect)
+    useEffect(() => {
+        document.body.classList.add("permanent-hide-header");
+        return () => document.body.classList.remove("permanent-hide-header");
     }, []);
 
     // === IMMERSIVE HEADER: Hide after 3s inactivity ===
@@ -227,54 +446,14 @@ export default function SecureTestPage() {
         };
     }, [blocked, loading, headerPermanentlyHidden]);
 
-    
-    const handleManualSubmit = useCallback(
-        async (auto = false) => {
-            if (blocked || !attempt || submittingRef.current) return;
-            if (!auto && !window.confirm("Submit now?")) return;
 
-            submittingRef.current = true;
-            try {
-                const answersArr = Object.entries(localAnswers).map(([qIndexStr, selectedIdx]) => ({
-                    qIndex: Number(qIndexStr),
-                    selectedIdx,
-                }));
-                const res = await fetch(`http://localhost:5000/api/attempts/${attemptId}/submit`, {
-                    method: "PUT",
-                    credentials: "include",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ answers: answersArr, forfeit: false, reason: auto ? "time_up" : "manual_submit" }),
-                });
-                const body = await res.json().catch(() => ({}));
-                alert(`Submitted! Score: ${body.score ?? "N/A"}`);
-            } catch (err) {
-                localStorage.setItem(
-                    `attempt_${attemptId}_pending_submit`,
-                    JSON.stringify({
-                        attemptId,
-                        answers: localAnswers,
-                        forfeit: false,
-                        reason: "manual_submit",
-                        ts: new Date().toISOString(),
-                    })
-                );
-                alert("Submit failed. Saved locally.");
-            } finally {
-                await exitFullscreen().catch(() => { });
-                localStorage.removeItem(`attempt_${attemptId}_answers`);
-                sessionStorage.removeItem(SESSION_KEY);
-                navigate("/student/dashboard");
-            }
-        },
-        [attempt, blocked, localAnswers, attemptId, navigate]
-    );
 
     // === BACK BUTTON TRAP: single press → auto-submit and exit ===
     useEffect(() => {
         let isLeaving = false;
 
         const handlePopState = async (e) => {
-            if (isLeaving || blocked) return;
+            if (isLeaving || blocked || !attempt || !test) return;
             e.preventDefault();
 
             isLeaving = true;
@@ -292,8 +471,11 @@ export default function SecureTestPage() {
         window.history.pushState(null, "", window.location.href);
 
         window.addEventListener("popstate", handlePopState);
-        window.addEventListener("beforeunload", handleBeforeUnload);
-
+        window.addEventListener("beforeunload", async (e) => {
+            if (!submittingRef.current) {
+                await handleManualSubmit(true);
+            }
+        });
         return () => {
             isLeaving = true;
             window.removeEventListener("popstate", handlePopState);
@@ -337,30 +519,83 @@ export default function SecureTestPage() {
             return {};
         }
     };
-
-    // === LOAD ATTEMPT & TEST ===
     useEffect(() => {
-        mountedRef.current = true;
+        let cancelled = false;  // ✅ ADD THIS
+
         async function load() {
             try {
-                const res = await fetch(`http://localhost:5000/api/attempts/${attemptId}`, { credentials: "include" });
-                if (!res.ok) throw new Error("Attempt not found");
-                const a = await res.json();
-                if (!mountedRef.current) return;
-                setAttempt(a);
+                console.log("🔍 LOADING attemptId:", attemptId);
+
+                // 1. GET attempt
+                const res = await fetch(`http://localhost:5000/api/attempts/${attemptId}`, {
+                    credentials: "include"
+                });
+                console.log("🔍 ATTEMPT STATUS:", res.status);
+
+                if (!res.ok) {
+                    const err = await res.text();
+                    throw new Error(`HTTP ${res.status}: ${err}`);
+                }
+
+                // 2. PARSE response
+                const body = await res.json();
+                const a = body.attempt || body;
+                console.log("🔍 FULL RESPONSE:", body);
+                console.log("🔍 ATTEMPT:", a);
+
+                // 3. EXTRACT testId
+                const testId = a.testId?._id || a.testId || a.test?.id || a.test?._id;
+                console.log("🔍 EXTRACTED testId:", testId);
+
+                if (!testId) {
+                    console.error("❌ NO testId FOUND:", {
+                        direct: a.testId,
+                        populated: a.testId?._id,
+                        testField: a.test,
+                        fullAttempt: a
+                    });
+
+                    alert("Invalid attempt - no testId. Go back to dashboard.");
+                    navigate("/student/dashboard");
+                    return;
+                }
+
+                if (cancelled) return;  // ✅ ADD THIS
+
+                // 4. SET attempt state
+                setAttempt({ ...a, testId });
                 setBlocked(!!a.blocked);
                 setExitCount(a.exitCount || 0);
 
-                const tRes = await fetch(`http://localhost:5000/api/tests/${a.testId}`);
+                // 5. GET test
+                console.log("🔍 FETCHING test:", testId);
+                const tRes = await fetch(`http://localhost:5000/api/tests/${testId}`);
+                if (!tRes.ok) throw new Error("Test not found");
+
                 const tb = await tRes.json();
                 const t = tb.test || tb;
-                if (!mountedRef.current) return;
+                console.log("🔍 TEST LOADED:", t);
 
-                const originalQuestions = Array.isArray(t.questions) ? t.questions : [];
-                const shuffledQuestions = seededShuffle(originalQuestions, attemptId);
+                if (cancelled) return;  // ✅ ADD THIS
 
-                setTest({ ...t, questions: shuffledQuestions });
+                // 6. Shuffle questions
+                const shuffledQuestions = [];
+                if (Array.isArray(t.sections)) {
+                    t.sections.forEach((section, sectionIndex) => {
+                        const shuffledSectionQuestions = seededShuffle(section.questions, `${attemptId}_${sectionIndex}`);
+                        shuffledSectionQuestions.forEach((q, qIndex) => {
+                            shuffledQuestions.push({
+                                ...q,
+                                section: section.name,
+                                originalSectionIndex: sectionIndex
+                            });
+                        });
+                    });
+                } else if (Array.isArray(t.questions)) {
+                    shuffledQuestions.push(...seededShuffle(t.questions, attemptId));
+                }
 
+                // 7. Load answers FIRST ✅ MOVED BEFORE setLoading
                 const serverAnswers = {};
                 (a.answers || []).forEach((ans) => {
                     if (typeof ans.selectedIdx === "number") serverAnswers[ans.qIndex] = ans.selectedIdx;
@@ -368,28 +603,31 @@ export default function SecureTestPage() {
                 const local = readAnswersLocally();
                 setLocalAnswers({ ...serverAnswers, ...local });
 
-                const sections = shuffledQuestions.reduce((acc, q, idx) => {
-                    const s = q.section || "Default";
-                    if (!acc[s]) acc[s] = [];
-                    acc[s].push(idx);
-                    return acc;
-                }, {});
-                const first = Object.keys(sections)[0] || null;
-                setCurrentSection(first);
-                setCurrentQIndex((sections[first]?.[0]) ?? 0);
+                setTest({ ...t, questions: shuffledQuestions });
 
                 const { startMs, endMs, durationMs } = computeStartEndDuration(a, t);
                 computeAndSetTimeLabels(startMs, endMs, durationMs);
+
+                if (cancelled) return;  // ✅ FINAL CHECK
+
+                setLoading(false);  // ✅ LAST - after everything loads
+
+                console.log("✅ LOAD COMPLETE:", { test: t.title, questions: shuffledQuestions.length });
             } catch (err) {
-                console.warn("Attempt fetch failed", err);
-                navigate("/student/dashboard");
+                if (!cancelled) {
+                    console.error("❌ LOAD FAILED:", err);
+                    navigate("/student/dashboard");
+                }
             } finally {
-                if (mountedRef.current) setLoading(false);
+                if (mountedRef.current && !cancelled) setLoading(false);
             }
         }
+
         load();
-        return () => (mountedRef.current = false);
+        return () => { cancelled = true; mountedRef.current = false; };
     }, [attemptId, navigate]);
+
+
 
     // === TIME LABELS ===
     const computeAndSetTimeLabels = (startMs, endMs, durationMs) => {
@@ -462,8 +700,9 @@ export default function SecureTestPage() {
 
             if (Number.isFinite(endMs)) {
                 const remain = Math.max(0, endMs - Date.now());
+
                 if (remain <= 0 && !submittingRef.current) {
-                    submittingRef.current = true;
+                    console.log("⏰ Time up - auto submitting test");
                     await handleManualSubmit(true);
                 }
             }
@@ -471,66 +710,30 @@ export default function SecureTestPage() {
 
         tick();
         tickRef.current = setInterval(tick, 1000);
+
         return () => clearInterval(tickRef.current);
-    }, [attempt, test, localAnswers, blocked, attemptId, navigate]);
 
-    // === FORFEIT & AUTO-SUBMIT ===
-    const immediateForfeit = async (reason) => {
-        if (submittingRef.current) return;
-        submittingRef.current = true;
-        setBlocked(true);
-        setHeaderPermanentlyHidden(true);
-
-        try {
-            const scopedKey = `${START_DISABLED_KEY}_${attempt?.testId || test?._id || test?.id || ""}`;
-            localStorage.setItem(scopedKey, "true");
-        } catch (e) { }
-
-        try {
-            const answersArr = Object.entries(localAnswers).map(([qIndexStr, selectedIdx]) => ({
-                qIndex: Number(qIndexStr),
-                selectedIdx,
-            }));
-            await fetch(`http://localhost:5000/api/attempts/${attemptId}/submit`, {
-                method: "PUT",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ answers: answersArr, forfeit: true, reason }),
-            }).catch(() => { });
-        } catch (err) {
-            console.error("Forfeit failed", err);
-        } finally {
-            await exitFullscreen().catch(() => { });
-            localStorage.removeItem(`attempt_${attemptId}_answers`);
-            sessionStorage.removeItem(SESSION_KEY);
-            setTimeout(() => navigate("/student/dashboard"), 300);
-        }
-    };
-
-    // === TAB SWITCH / BLUR ===
+    }, [attempt, test, blocked, handleManualSubmit]);
+    
     useEffect(() => {
-        if (!attempt || blocked) return;
 
-        const onVisibilityChange = () => {
-            if (document.visibilityState === "hidden") {
-                setTabSwitchCount(p => p + 1);
-                immediateForfeit("tab_switch");
+        const detectFocusLoss = () => {
+
+            console.log("Window focus lost");
+
+            if (!submittingRef.current) {
+                handleManualSubmit(true);
             }
+
         };
 
-        const onBlur = () => {
-            setTabSwitchCount(p => p + 1);
-            immediateForfeit("blur");
-        };
-
-        document.addEventListener("visibilitychange", onVisibilityChange);
-        window.addEventListener("blur", onBlur);
+        window.addEventListener("blur", detectFocusLoss);
 
         return () => {
-            document.removeEventListener("visibilitychange", onVisibilityChange);
-            window.removeEventListener("blur", onBlur);
+            window.removeEventListener("blur", detectFocusLoss);
         };
-    }, [attempt, blocked, localAnswers]);
+
+    }, [handleManualSubmit]);
 
     // === ANSWER HANDLING ===
     const selectAnswer = (qIdx, idx) => {
@@ -550,28 +753,22 @@ export default function SecureTestPage() {
     };
 
     const handlePrev = () => {
-        const sections = getSections();
         const list = sections[currentSection] || [];
         const pos = list.indexOf(currentQIndex);
-        if (pos > 0) setCurrentQIndex(list[pos - 1]);
+
+        if (pos !== -1 && pos > 0) {
+            setCurrentQIndex(list[pos - 1]);
+        }
     };
 
     const handleNext = () => {
-        const sections = getSections();
         const list = sections[currentSection] || [];
         const pos = list.indexOf(currentQIndex);
-        if (pos < list.length - 1) setCurrentQIndex(list[pos + 1]);
+        if (pos !== -1 && pos < list.length - 1) {
+            setCurrentQIndex(list[pos + 1]);
+        }
     };
 
-    const getSections = () => {
-        const questions = test?.questions || [];
-        return questions.reduce((acc, q, idx) => {
-            const s = q.section || "Default";
-            if (!acc[s]) acc[s] = [];
-            acc[s].push(idx);
-            return acc;
-        }, {});
-    };
 
     const saveAnswersToServer = async () => {
         try {
@@ -588,69 +785,167 @@ export default function SecureTestPage() {
                 body: JSON.stringify(payload),
             });
             saveAnswersLocally(localAnswers);
-            alert("Progress saved.");
         } catch (err) {
             saveAnswersLocally(localAnswers);
-            alert("Saved locally.");
         }
     };
 
-  
 
-    // === RENDER ===
-    if (loading) {
+    if (loading) return <div>Loading...</div>;
+    if (blocked) return <div>Test Blocked</div>;
+    if (!test || !attempt) return <div>Test not found</div>;
+    // 🟢 ADD HEADER HERE - WORKS FOR BOTH SCREENS
+
+
+
+    if (!currentSection) {
+        const allSections = sections;
         return (
-            <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl shadow-lg p-8 text-center w-full max-w-md">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600 font-medium">Loading secure test...</p>
+            <div className="min-h-screen bg-gray-50/50 py-12 px-5 sm:px-6 lg:px-8">
+                {/* 🟢 TEST INFO BAR - PASTE HERE */}
+                <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-2xl mb-8 p-4 rounded-xl max-w-5xl mx-auto">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex items-center gap-3 flex-wrap">
+                            <span className="font-bold text-xl">{test?.title || "Online Test"}</span>
+                            <span>•</span>
+                            <span className="hidden sm:inline">{test?.institute}</span>
+                        </div>
+                        <div className="flex items-center gap-6">
+                            <div className="flex items-center gap-1 font-mono text-lg font-bold">
+                                <Clock className="w-5 h-5" />
+                                {timeLabel}
+                            </div>
+                            <div className="text-sm bg-white/20 px-4 py-2 rounded-lg">
+                                {Object.keys(localAnswers || {}).length}/{test?.questions?.length || 0}
+                            </div>
+
+
+                        </div>
+                    </div>
+                </div>
+
+                <div className="max-w-5xl mx-auto">
+                    {/* Header */}
+                    <div className="text-center mb-12">
+                        <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 mb-3">
+                            {test.title || "Online Assessment"}
+                        </h1>
+                        <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+                            Please select a section to begin. You can switch between sections later if allowed.
+                        </p>
+                    </div>
+                    {Object.entries(sections).map(([sectionName, questionIndices], index) => {
+                        const sectionColors = [
+                            { accent: 'bg-indigo-600', text: 'text-indigo-700', light: 'bg-indigo-50' },
+                            { accent: 'bg-blue-600', text: 'text-blue-700', light: 'bg-blue-50' },
+                            { accent: 'bg-purple-600', text: 'text-purple-700', light: 'bg-purple-50' },
+                            { accent: 'bg-teal-600', text: 'text-teal-700', light: 'bg-teal-50' },
+                        ];
+                        const color = sectionColors[index % sectionColors.length];
+
+                        // 🟢 PROGRESS INSIDE MAP = NO ESLint ERROR
+                        const answeredInSection = questionIndices.filter(idx => localAnswers[idx] !== undefined).length;
+                        const progress = questionIndices.length
+                            ? ((answeredInSection / questionIndices.length) * 100).toFixed(0)
+                            : 0;
+                        return (
+                            <div key={sectionName} className="bg-white rounded-xl border border-gray-200 hover:border-gray-300 hover:shadow-md transition-all duration-200 overflow-hidden">
+                                <div className="flex flex-col sm:flex-row items-stretch">
+                                    <div className={`sm:w-24 flex-shrink-0 ${color.accent} flex items-center justify-center py-6 sm:py-0`}>
+                                        <div className="text-white font-semibold text-xl sm:text-2xl tracking-wide">
+                                            {String(index + 1).padStart(2, '0')}
+                                        </div>
+                                    </div>
+                                    <div className="flex-1 px-6 py-7 sm:py-8 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+                                        <div>
+                                            <h3 className={`text-2xl sm:text-3xl font-semibold ${color.text} mb-2`}>{sectionName}</h3>
+                                            <div className="flex items-center gap-4 text-gray-600">
+                                                <span className={`inline-flex items-center px-4 py-1.5 rounded-full text-sm font-medium ${answeredInSection === questionIndices.length ? 'bg-green-100 text-green-800' :
+                                                    answeredInSection > questionIndices.length / 2 ? 'bg-yellow-100 text-yellow-800' :
+                                                        'bg-gray-100 text-gray-800'
+                                                    }`}>
+                                                    {answeredInSection}/{questionIndices.length} ({progress}%)
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => {
+                                                if (questionIndices.length > 0) {
+                                                    setCurrentSection(sectionName);
+                                                    setCurrentQIndex(questionIndices[0]);
+                                                }
+                                            }}
+                                            className={`px-8 py-3.5 rounded-lg font-medium text-base transition-all duration-200 flex items-center gap-2 min-w-[160px] ${answeredInSection === questionIndices.length
+                                                ? 'bg-green-600 text-white hover:bg-green-700 shadow-lg'
+                                                : 'bg-gray-800 text-white hover:bg-gray-900'
+                                                }`}
+                                        >
+                                            {answeredInSection === questionIndices.length ? '✅ Completed' : 'Start Section'}
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+
+
+                    {/* Footer note */}
+                    <div className="mt-12 text-center text-gray-500 text-sm">
+                        All sections must be completed before final submission.<br />
+                        You may review and change answers within each section.
+
+                    </div>
+                    <div className="mt-6 text-center">
+                        <button
+                            onClick={() => handleManualSubmit(false)}
+                            className="px-8 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition shadow-md"
+                        >
+                            Submit Test
+                        </button>
+                    </div>
                 </div>
             </div>
         );
     }
 
-    if (blocked) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-red-50 to-rose-100 flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl shadow-xl p-8 text-center max-w-md w-full border border-red-100">
-                    <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-                    <h2 className="text-2xl font-bold text-red-700 mb-2">Test Blocked</h2>
-                    <p className="text-gray-600 mb-6">Attempt forfeited due to security violation.</p>
-                    <button onClick={() => navigate("/student/dashboard")} className="px-6 py-3 bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-xl font-semibold hover:from-sky-700 hover:to-indigo-700 transition shadow-md">
-                        Back to Dashboard
-                    </button>
-                </div>
-            </div>
-        );
-    }
 
-    if (!test || !attempt) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl shadow-lg p-8 text-center max-w-md w-full">
-                    <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
-                    <p className="text-red-600 font-medium text-lg">Test not available.</p>
-                </div>
-            </div>
-        );
-    }
+    const allQuestions = test?.questions || [];
+    const totalQuestions = allQuestions.length;
+    // 🟢 SECTIONS - INLINE (no function)
 
-    const questions = test.questions || [];
-    const sections = getSections();
-    const currentSectionQuestions = sections[currentSection] || [];
-    const qIndex = currentQIndex;
-    const q = questions[qIndex] || {};
-    const totalQuestions = questions.length;
-    const questionStatuses = questions.map((_, idx) => {
-        if (localAnswers[idx] !== undefined) return 1;
-        if (idx === currentQIndex) return 2;
-        return 0;
-    });
+    // const sections = getSections();
     const answeredCount = Object.keys(localAnswers).length;
-    const progress = ((answeredCount / totalQuestions) * 100).toFixed(0);
+    const progress = totalQuestions ? ((answeredCount / totalQuestions) * 100).toFixed(0) : '0';
+
+
+    // const sections = getSections();  
+    // 🟢 CURRENT QUESTION OBJECT
+    // 🟢 SECTION-SPECIFIC VARIABLES (only if in question view)
+    let sectionQuestionIndices = [];
+    let sectionQuestions = [];
+    let qIndexInSection = 0;
+    let currentQuestion = null;
+    if (currentSection) {
+        sectionQuestionIndices = sections[currentSection] || [];
+        sectionQuestions = sectionQuestionIndices.map(idx => allQuestions[idx]);
+        qIndexInSection = sectionQuestionIndices.indexOf(currentQIndex);
+        if (qIndexInSection >= 0) {
+            currentQuestion = sectionQuestions[qIndexInSection];
+        }
+    }
+
+
+    // const answeredCount = Object.keys(localAnswers).length;
+    // const progress = ((answeredCount / totalQuestions) * 100).toFixed(0);
+
+    // 🟢 ADD THIS IMMEDIATELY AFTER const progress line
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex flex-col overflow-hidden">
+
 
             {/* Fullscreen Warning */}
             {fullscreenWarning && (
@@ -675,39 +970,48 @@ export default function SecureTestPage() {
                     </div>
                 </div>
             )}
+            <header className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-2xl border-b-4 border-indigo-400 sticky top-0 z-[999]">
+                <div className="max-w-6xl mx-auto px-4 py-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-sm">
+                        {/* Test Info */}
+                        <div className="flex items-center gap-3 flex-wrap">
+                            <span className="font-bold text-lg truncate max-w-[200px]">
+                                {test?.title || "Online Test"}
+                            </span>
+                            <span>•</span>
+                            <span className="hidden sm:inline">{test?.institute || "Institute"}</span>
+                            <span>•</span>
+                            <span>{test?.courseName || test?.targetAudience || "Course"}</span>
+                        </div>
 
-            {/* Header - Hidden permanently after back press */}
-            {!headerPermanentlyHidden && (
-                <header className={`bg-white/90 backdrop-blur-md shadow-md border-b border-gray-100/50 px-6 py-4 flex items-center justify-between sticky top-0 z-40 transition-opacity duration-500 ${headerVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
-                    <div className="flex items-center space-x-4">
-                        <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 rounded-md hover:bg-gray-100 transition">
-                            <Menu className="w-5 h-5 text-gray-700" />
-                        </button>
-                        <div>
-                            <h1 className="text-2xl font-semibold text-gray-900">{test.title}</h1>
-                            <p className="text-sm text-gray-500 mt-1">{test.institute} • {test.courseName || test.targetAudience}</p>
-                        </div>
-                    </div>
-                    <div className="flex items-center space-x-6">
-                        <div className="text-right hidden sm:block">
-                            <div className="flex items-center gap-2 text-red-600 font-mono text-lg">
-                                <Clock className="w-5 h-5" />
-                                <div>
-                                    <div className="font-semibold">{timeLabel}</div>
-                                    {timeSubLabel && <div className="text-xs text-gray-500 mt-0.5">{timeSubLabel}</div>}
-                                </div>
+                        {/* Live Stats */}
+                        <div className="flex items-center gap-6 flex-wrap justify-center">
+                            <div className="flex items-center gap-1 font-mono text-lg font-bold">
+                                <Clock className="w-4 h-4" />
+                                {timeLabel}
                             </div>
-                            <div className="text-xs text-gray-500 flex items-center gap-2 mt-1">
-                                <LogOut className="w-4 h-4" />
-                                Exits: {exitCount} • Tabs: {tabSwitchCount}
+                            <div className="flex items-center gap-2 text-xs bg-white/20 px-3 py-1 rounded-lg backdrop-blur-sm">
+                                🚪 {exitCount} • 💻 {tabSwitchCount}
+                            </div>
+                            <div className="text-xs">
+                                {Object.keys(localAnswers || {}).length}/{test?.questions?.length || 0}
+                                ({((Object.keys(localAnswers || {}).length / (test?.questions?.length || 1)) * 100).toFixed(0)}%)
                             </div>
                         </div>
-                        <button onClick={() => handleManualSubmit(false)} className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-lg text-sm font-medium hover:from-indigo-700 hover:to-blue-700 transition shadow-sm">
-                            Submit Test
-                        </button>
+
+                        {/* Submit Button */}
+                        <div className="flex-shrink-0">
+                            <button
+                                onClick={() => handleManualSubmit(false)}
+                                disabled={!attempt || blocked}
+                                className="px-6 py-2 bg-white text-indigo-600 font-bold rounded-lg hover:bg-gray-100 transition-all duration-200 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Submit Test
+                            </button>
+                        </div>
                     </div>
-                </header>
-            )}
+                </div>
+            </header>
 
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
                 {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
@@ -720,59 +1024,128 @@ export default function SecureTestPage() {
 
                     <div className="flex-1 overflow-y-auto p-5">
                         <div className="grid grid-cols-5 gap-3">
-                            {questions.map((_, idx) => {
-                                const status = questionStatuses[idx];
+                            {(sections[currentSection] || []).map((idx) => {
+                                const isAnswered = localAnswers[idx] !== undefined;
+                                const isCurrent = currentSection === allQuestions[idx]?.section && idx === currentQIndex;
                                 return (
-                                    <button key={idx} onClick={() => { setCurrentQIndex(idx); setSidebarOpen(false); }} className={`w-10 h-10 rounded-lg text-sm font-medium transition-all flex items-center justify-center ${status === 1 ? "bg-green-500 text-white hover:bg-green-600" : status === 2 ? "bg-red-500 text-white ring-2 ring-red-300" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                                    <button
+                                        key={idx}
+                                        onClick={() => {
+                                            const sectionName = allQuestions[idx]?.section;
+                                            if (sectionName) {
+                                                setCurrentSection(sectionName);
+                                                setCurrentQIndex(idx);
+                                                setSidebarOpen(false);
+                                            }
+                                        }}
+                                        className={`w-12 h-12 rounded-lg font-bold text-sm flex items-center justify-center transition-all duration-200 shadow-md border-2 ${isAnswered
+                                            ? 'bg-green-500 text-white border-green-600 shadow-green-200 hover:shadow-green-300'  // ✅ GREEN - Attempted
+                                            : isCurrent
+                                                ? 'bg-yellow-500 text-white border-yellow-600 shadow-yellow-200 hover:shadow-yellow-300'  // 🟡 YELLOW - Current
+                                                : 'bg-gray-200 text-gray-600 border-gray-300 hover:bg-gray-300 hover:border-gray-400 shadow-gray-100'  // ⚪ GRAY - Not visited
+                                            }`}
+                                    >
                                         {idx + 1}
                                     </button>
                                 );
                             })}
+
                         </div>
                     </div>
 
                     <div className="p-5 border-t border-gray-100 space-y-2 bg-gray-50">
                         <div className="flex items-center gap-2 text-sm"><div className="w-4 h-4 bg-green-500 rounded"></div><span>Answered</span></div>
-                        <div className="flex items-center gap-2 text-sm"><div className="w-4 h-4 bg-red-500 rounded"></div><span>Current</span></div>
-                        <div className="flex items-center gap-2 text-sm"><div className="w-4 h-4 bg-gray-100 rounded border"></div><span>Not Visited</span></div>
+                        <div className="flex items-center gap-2 text-sm"><div className="w-4 h-4 bg-yellow-500 rounded"></div><span>Current</span></div>
+                        <div className="flex items-center gap-2 text-sm"><div className="w-4 h-4 bg-gray-100 rounded border"></div><span>Not Answered</span></div>
                     </div>
                 </aside>
 
                 <main className="flex-1 p-6 overflow-y-auto">
-                    <div className="sm:hidden flex justify-between items-center mb-6 p-4 bg-white rounded-lg shadow">
-                        <div className="flex items-center gap-2 text-red-600 font-mono text-base"><Clock className="w-5 h-5" />{timeLabel}</div>
-                        <div className="text-xs text-gray-500">Exits: {exitCount}</div>
+                    {/* 🟢 TEST INFO BAR - PASTE HERE (replaces sm:hidden div) */}
+                    <div className="mb-8 p-5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-2xl shadow-2xl">
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 max-w-4xl">
+                            <div className="flex items-center gap-3 flex-wrap">
+                                <span className="font-bold text-xl truncate max-w-[250px]">{test?.title}</span>
+                                <span>•</span>
+                                <span className="hidden lg:inline">{test?.institute}</span>
+                            </div>
+                            <div className="flex items-center gap-6 flex-wrap">
+                                <div className="flex items-center gap-2 font-mono text-xl font-bold">
+                                    <Clock className="w-5 h-5" />
+                                    {timeLabel}
+                                </div>
+                                <div className="flex items-center gap-3 text-sm bg-white/20 px-4 py-2 rounded-xl">
+                                    <span>🚪 {exitCount}</span>
+                                    <span>💻 {tabSwitchCount}</span>
+                                </div>
+                                <div className="text-sm bg-white/10 px-4 py-2 rounded-xl">
+                                    {Object.keys(localAnswers || {}).length}/{test?.questions?.length || 0}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="mb-6 text-center">
+                        <div className="text-2xl font-bold text-gray-800 mb-2">
+                            {answeredCount}/{totalQuestions} ({progress}%)
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-3">
+                            <div
+                                className="bg-gradient-to-r from-indigo-500 to-purple-600 h-3 rounded-full transition-all duration-300"
+                                style={{ width: `${progress}%` }}
+                            ></div>
+                        </div>
                     </div>
 
                     <div className="mb-6">
                         <label className="block text-sm font-medium text-gray-700 mb-2">Sections</label>
                         <div className="flex flex-wrap gap-2">
-                            {Object.keys(sections).map((s) => (
-                                <button key={s} onClick={() => setCurrentSection(s)} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${currentSection === s ? "bg-indigo-600 text-white" : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"}`}>
-                                    {s}
-                                </button>
-                            ))}
+                            {Object.keys(sections).map((s) => {
+                                const isCompleted =
+                                    completedSections[s] ||
+                                    sections[s].every(q => localAnswers[q] !== undefined); return (
+                                        <button
+                                            key={s}
+                                            onClick={() => setCurrentSection(s)}
+                                            disabled={isCompleted}
+                                            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${currentSection === s
+                                                ? "bg-indigo-600 text-white"
+                                                : isCompleted
+                                                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                                                    : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+                                                }`}
+                                        >
+                                            {isCompleted ? `✅ ${s}` : s}
+                                        </button>
+                                    );
+                            })}
+
                         </div>
                     </div>
 
                     <div className="bg-white rounded-xl shadow-md p-6 mb-6">
                         <div className="flex justify-between items-start mb-4">
                             <div>
-                                <span className="text-sm text-gray-500">Question {qIndex + 1} of {totalQuestions}</span>
-                                <h3 className="text-xl font-semibold text-gray-800 mt-1">{q?.questionText || "No question text"}</h3>
+                                <span className="text-sm text-gray-500">Question {qIndexInSection + 1} of {sectionQuestions.length} ({currentSection})</span>
+                                <h3 className="text-xl font-semibold text-gray-800 mt-1">{currentQuestion?.questionText || "No question text"}</h3>
                             </div>
-                            {q.marks && <span className="text-sm font-medium text-indigo-600 bg-indigo-50 px-3 py-1 rounded">{q.marks} mark{q.marks > 1 ? "s" : ""}</span>}
+                            {currentQuestion?.marks && <span className="text-sm font-medium text-indigo-600 bg-indigo-50 px-3 py-1 rounded">{currentQuestion.marks} mark{currentQuestion.marks > 1 ? "s" : ""}</span>}
                         </div>
 
                         <div className="space-y-4 mt-6">
-                            {Array.isArray(q.options) && q.options.length > 0 ? (
-                                q.options.map((opt, i) => (
-                                    <label key={i} className={`flex items-center p-4 rounded-lg border cursor-pointer transition-all ${localAnswers[qIndex] === i ? "border-indigo-600 bg-indigo-50" : "border-gray-200 hover:border-gray-300 bg-white"}`}>
-                                        <input type="radio" name={`q${qIndex}`} checked={localAnswers[qIndex] === i} onChange={() => selectAnswer(qIndex, i)} className="w-5 h-5 text-indigo-600 focus:ring-indigo-500" />
+                            {Array.isArray(currentQuestion?.options) && currentQuestion.options.length > 0 ? (
+                                currentQuestion.options.map((opt, i) => (
+                                    <label key={i} className={`flex items-center p-4 rounded-lg border cursor-pointer transition-all ${localAnswers[currentQIndex] === i ? "border-indigo-600 bg-indigo-50" : "border-gray-200 hover:border-gray-300 bg-white"}`}>
+                                        <input
+                                            type="radio"
+                                            name={`q${currentQIndex}`}
+                                            checked={localAnswers[currentQIndex] === i}
+                                            onChange={() => selectAnswer(currentQIndex, i)}
+                                            className="w-5 h-5 text-indigo-600 focus:ring-indigo-500"
+                                        />
                                         <span className="ml-3 text-gray-800">{opt.text ?? opt}</span>
                                     </label>
-                                ))
-                            ) : (
+                                ))) : (
                                 <p className="text-gray-500 italic">No options available.</p>
                             )}
                         </div>
@@ -780,19 +1153,35 @@ export default function SecureTestPage() {
 
                     <div className="flex flex-col sm:flex-row gap-4 justify-between">
                         <div className="flex gap-4">
-                            <button onClick={handlePrev} disabled={currentSectionQuestions.indexOf(currentQIndex) === 0} className="px-6 py-3 bg-white border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition">
+                            <button onClick={handlePrev} disabled={qIndexInSection <= 0}
+                                className="px-6 py-3 bg-white border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition">
                                 Previous
                             </button>
-                            <button onClick={handleNext} disabled={currentSectionQuestions.indexOf(currentQIndex) === currentSectionQuestions.length - 1} className="px-6 py-3 bg-white border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition">
+                            <button
+                                onClick={handleNext}
+                                disabled={qIndexInSection >= sectionQuestions.length - 1}
+                                className="px-6 py-3 bg-white border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition"
+                            >
                                 Next
                             </button>
                         </div>
                         <div className="flex gap-4">
-                            <button onClick={saveAnswersToServer} className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition">
-                                Save Progress
-                            </button>
-                            <button onClick={() => handleManualSubmit(false)} className="px-6 py-3 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition">
-                                Submit Test
+                            <button
+                                onClick={async () => {
+                                    await saveAnswersToServer();
+
+                                    // 🟢 SAVE TO LOCALSTORAGE + STATE
+                                    const completedKey = `attempt_${attemptId}_completed_sections`;
+                                    const newCompleted = { ...completedSections, [currentSection]: true };
+                                    setCompletedSections(newCompleted);
+                                    localStorage.setItem(completedKey, JSON.stringify(newCompleted));
+
+                                    setCurrentSection(null);
+                                }}
+
+                                className="px-6 py-3 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition"
+                            >
+                                submit section
                             </button>
                         </div>
                     </div>
@@ -801,8 +1190,10 @@ export default function SecureTestPage() {
 
             <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-3 flex justify-around items-center shadow-lg z-40">
                 <button onClick={() => setSidebarOpen(true)} className="flex flex-col items-center text-xs text-gray-600"><Circle className="w-5 h-5" /><span>Palette</span></button>
-                <button onClick={handlePrev} disabled={currentSectionQuestions.indexOf(currentQIndex) === 0} className="flex flex-col items-center text-xs text-gray-600 disabled:opacity-50">Prev</button>
-                <button onClick={handleNext} disabled={currentSectionQuestions.indexOf(currentQIndex) === currentSectionQuestions.length - 1} className="flex flex-col items-center text-xs text-gray-600 disabled:opacity-50">Next</button>
+                <button onClick={handlePrev} disabled={qIndexInSection === 0}
+                    className="flex flex-col items-center text-xs text-gray-600 disabled:opacity-50">Prev</button>
+                <button onClick={handleNext} disabled={qIndexInSection === sectionQuestions.length - 1}
+                    className="flex flex-col items-center text-xs text-gray-600 disabled:opacity-50">Next</button>
                 <button onClick={() => handleManualSubmit(false)} className="flex flex-col items-center text-xs font-medium text-indigo-600"><CheckCircle className="w-5 h-5" /><span>Submit</span></button>
             </div>
         </div>

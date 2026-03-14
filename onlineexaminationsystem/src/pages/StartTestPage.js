@@ -2,12 +2,14 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { AlertCircle, Lock, PlayCircle, XCircle } from "lucide-react";
 
+
 const SESSION_KEY = "currentTestAttempt";
 const START_DISABLED_KEY = "startDisabled";
 
 function pad(n) {
     return String(n).padStart(2, "0");
 }
+
 function formatCountdownMs(ms) {
     if (!isFinite(ms) || ms <= 0) return "00:00";
     const totalSec = Math.floor(ms / 1000);
@@ -57,9 +59,21 @@ export default function StartTestPage() {
     const [remainingLabel, setRemainingLabel] = useState(null);
     const [remainingMs, setRemainingMs] = useState(NaN);
 
+    // ✅ FIXED: Read attempt from sessionStorage (created by dashboard)
+    // ✅ HELPER: Read attempt from sessionStorage
+    function readAttempt() {
+        try {
+            const raw = sessionStorage.getItem("currentTestAttempt");
+            return raw ? JSON.parse(raw) : null;
+        } catch {
+            return null;
+        }
+    }
+
+
     // Clear session and block flags on entering this page
     useEffect(() => {
-        sessionStorage.removeItem(SESSION_KEY);
+        // ✅ Don't clear sessionStorage - dashboard already set it!
         const scopedKey = `${START_DISABLED_KEY}_${testId}`;
         localStorage.removeItem(scopedKey);
         setStartDisabled(false);
@@ -85,7 +99,7 @@ export default function StartTestPage() {
         return () => (mounted = false);
     }, [testId]);
 
-    // Hide header & check disabled
+    // Hide header
     useEffect(() => {
         document.body.classList.add("hide-header");
         return () => document.body.classList.remove("hide-header");
@@ -124,23 +138,6 @@ export default function StartTestPage() {
         return () => clearInterval(id);
     }, [test]);
 
-    // Session helpers
-    const readAttempt = () => {
-        try {
-            const raw = sessionStorage.getItem(SESSION_KEY);
-            return raw ? JSON.parse(raw) : null;
-        } catch {
-            return null;
-        }
-    };
-    const writeAttempt = (obj) => {
-        try {
-            sessionStorage.setItem(SESSION_KEY, JSON.stringify(obj));
-        } catch (e) {
-            console.warn(e);
-        }
-    };
-
     const requestFullscreen = async () => {
         const elem = document.documentElement;
         if (elem.requestFullscreen) return elem.requestFullscreen();
@@ -149,37 +146,29 @@ export default function StartTestPage() {
 
     const onStart = async () => {
         if (!agree) return setError("You must agree to the terms.");
-        if (startDisabled) return;
-        setError("");
         setStarting(true);
 
         try {
-            await requestFullscreen();
-            writeAttempt({ id: testId, startedAt: Date.now() });
-
-            const studentEmail = localStorage.getItem("email");
-            const res = await fetch(`http://localhost:5000/api/tests/${testId}/attempt`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify({ studentEmail }),
-            });
-
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.message || "Failed to create attempt");
+            const attempt = readAttempt();
+            if (!attempt?.attemptId) {
+                setError("No valid session. Start from dashboard.");
+                return;
             }
 
-            const { attemptId } = await res.json();
-            writeAttempt({ ...readAttempt(), attemptId });
-            navigate(`/secure-test/${attemptId}`, { state: { hideHeader: true } });
+            // Request fullscreen
+            await requestFullscreen();
+
+            // Go to SecureTestPage
+            navigate(`/secure-test/${attempt.attemptId}`);
         } catch (err) {
-            setError(err.message || "Could not start test");
-            if (document.fullscreenElement) await document.exitFullscreen();
+            setError(err.message);
         } finally {
             setStarting(false);
         }
     };
+
+
+
 
     // Loading
     if (loading) {
@@ -209,6 +198,10 @@ export default function StartTestPage() {
 
     const totalQuestions = test.questions?.length || 0;
 
+    // ✅ SHOW SESSION STATUS
+    const attempt = readAttempt();
+    const hasValidSession = attempt && attempt.attemptId && attempt.testId === testId;
+
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center p-4">
             <div className="w-full max-w-3xl">
@@ -219,6 +212,23 @@ export default function StartTestPage() {
                     <p className="text-sm text-gray-600 mb-8">
                         The test will open in fullscreen mode when you start.
                     </p>
+
+                    {/* Session Status */}
+                    {hasValidSession ? (
+                        <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+                            <div className="flex items-center gap-2 text-emerald-800">
+                                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                                <span>✅ Session ready (Attempt: {attempt.attemptId.slice(-6)})</span>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                            <div className="flex items-center gap-2 text-amber-800">
+                                <AlertCircle className="w-5 h-5" />
+                                <span>⚠️ Start from dashboard first</span>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Info Grid */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -279,8 +289,8 @@ export default function StartTestPage() {
                     <div className="flex flex-col sm:flex-row gap-4">
                         <button
                             onClick={onStart}
-                            disabled={!agree || startDisabled || starting}
-                            className={`flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-semibold text-white transition-all transform hover:scale-105 shadow-lg ${agree && !startDisabled && !starting
+                            disabled={!agree || startDisabled || starting || !hasValidSession}
+                            className={`flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-semibold text-white transition-all transform hover:scale-105 shadow-lg ${agree && !startDisabled && !starting && hasValidSession
                                 ? "bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700"
                                 : "bg-gray-400 cursor-not-allowed"
                                 }`}

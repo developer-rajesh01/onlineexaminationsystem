@@ -66,8 +66,8 @@ export default function Profile() {
               />
             </svg>
           </div>
-          <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">
-            {profile.name}
+          <h1 className="text-4xl md:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">
+            {profile.name} 
           </h1>
           {/* <p className="text-gray-600 mt-3 text-sm md:text-base max-w-md mx-auto">
             Your secure, locally stored profile — no server, no tracking.

@@ -22,12 +22,20 @@ export const createTest = async (req, res, next) => {
             passMarks,
             totalMarks,
             institute,
-            questions = [],
+            sections = [],  // ✅ Changed from questions
             facultyEmail
         } = req.body;
 
+        console.log("🔍 Frontend payload:", {
+            title: title,
+            duration: duration,
+            startTimestamp: startTimestamp,
+            startDate: startDate,
+            startTime: startTime,
+            targetAudience: targetAudience
+        });
         // Basic validation
-        if (!title || !duration || (!startTimestamp && !(startDate && startTime)) || !totalMarks || !targetAudience) {
+        if (!title || !duration || (!startTimestamp && !(startDate && startTime)) || !targetAudience) {
             return res.status(400).json({ message: "Missing required fields: title, duration, startTimestamp OR (startDate+startTime), totalMarks, targetAudience" });
         }
 
@@ -63,12 +71,20 @@ export const createTest = async (req, res, next) => {
             duration: dur,
             startTimestamp: start,
             endTimestamp: end,
-            targetAudience,
             author,
             passMarks: passMarks !== undefined ? Number(passMarks) : undefined,
-            totalMarks: Number(totalMarks),
+            totalMarks: sections.reduce((sum, sec) => sum + Number(sec.marks || 10), 0) || 10,
             institute,
-            questions,
+            sections: sections.length ? sections.map(sec => ({
+                name: sec.name || 'General',
+                marks: Number(sec.marks || 10),  // ✅ Your format: marks
+                questions: (sec.questions || []).map(q => ({
+                    questionText: q.questionText || '',
+                    options: (q.options || []).map(opt => ({ text: opt.text || opt })),
+                    correctIdx: q.correctIdx || 0
+                }))
+            })) : [{ name: 'General', marks: 10, questions: [] }],
+            courseName: courseName || targetAudience,
             facultyEmail,
             status: (new Date() < start) ? "upcoming" : (new Date() >= start && new Date() < end) ? "ongoing" : "completed"
         });
@@ -84,7 +100,7 @@ export const createTest = async (req, res, next) => {
                     title: test.title,
                     startTimestamp: test.startTimestamp,
                     endTimestamp: test.endTimestamp,
-                    targetAudience: test.targetAudience,
+                    targetAudience: test.targetAudience || test.courseName,
                 };
 
                 // emit to audience rooms

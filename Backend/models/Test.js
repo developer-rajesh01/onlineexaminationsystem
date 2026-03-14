@@ -1,11 +1,33 @@
 // models/Test.js
 import mongoose from "mongoose";
 
+const optionSchema = new mongoose.Schema(
+    {
+        text: { type: String, required: true },
+    },
+    { _id: true } // Mongo auto-generates _id
+);
+
 const questionSchema = new mongoose.Schema({
     questionText: { type: String, required: true },
-    options: [{ type: String, required: true }],
-    correctIdx: { type: Number, required: true },
+
+    options: {
+        type: [optionSchema],
+        validate: [(arr) => arr.length >= 2, "At least 2 options required"],
+    },
+
+    correctOptionId: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true,
+    },
 });
+
+// ADD THIS NEW SCHEMA - after questionSchema
+const sectionSchema = new mongoose.Schema({
+    name: { type: String, required: true, default: 'General' },
+    marks: { type: Number, required: true, default: 10 },
+    questions: [questionSchema],
+}, { _id: false });  // No _id needed for embedded sections
 
 // small helper to pad numbers
 function pad(n) {
@@ -48,9 +70,9 @@ const testSchema = new mongoose.Schema(
 
         author: { type: String, required: true },
         passMarks: { type: Number },
-        totalMarks: { type: Number, required: true },
+        totalMarks: { type: Number, required: false },
         institute: { type: String, required: true },
-        questions: [questionSchema],
+        sections: [sectionSchema],  // ✅ Nested sections with points
         facultyEmail: { type: String, required: true },
         status: {
             type: String,

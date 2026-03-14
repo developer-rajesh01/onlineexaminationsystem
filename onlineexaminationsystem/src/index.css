@@ -11,3 +11,21 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+/* Add to your index.css or App.css */
+.permanent-hide-header nav,
+.permanent-hide-header header,
+.permanent-hide-header .navbar,
+.permanent-hide-header .header,
+.permanent-hide-header [class*="header"],
+.permanent-hide-header [class*="nav"] {
+  display: none !important;
+  height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+}
+
+.permanent-hide-header body {
+  padding-top: 0 !important;
+  margin-top: 0 !important;
+}

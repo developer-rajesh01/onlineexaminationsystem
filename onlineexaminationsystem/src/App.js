@@ -23,6 +23,8 @@ import StudentScoreboard from "./pages/student/scoreboard";
 // New pages for test flow
 import StartTestPage from "./pages/StartTestPage";
 import SecureTestPage from "./pages/SecureTestPage";
+// import TestReportPage from "./pages/TestReportPage";
+import TestReport from "./pages/faculty/TestReport";
 
 function App() {
   return (
@@ -58,6 +60,14 @@ function App() {
             element={
               <ProtectedRoute roleRequired="faculty">
                 <Scoreboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/test-report/:testId"
+            element={
+              <ProtectedRoute roleRequired="faculty">
+                <TestReport />
               </ProtectedRoute>
             }
           />
@@ -115,13 +125,14 @@ function App() {
 
           {/* Start test (agreement) and Secure test (fullscreen attempt) */}
           <Route
-            path="startTest/:id"
+            path="test/:id"  // ← Matches useParams() { id: testId }
             element={
               <ProtectedRoute roleRequired="student">
                 <StartTestPage />
               </ProtectedRoute>
             }
           />
+
           <Route
             path="secure-test/:attemptId"
             element={
@@ -130,9 +141,6 @@ function App() {
               </ProtectedRoute>
             }
           />
-
-          {/* Optionally add 404 */}
-          {/* <Route path="*" element={<NotFound />} /> */}
         </Route>
       </Routes>
     </BrowserRouter>

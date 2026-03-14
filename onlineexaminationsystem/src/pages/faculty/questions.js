@@ -1,33 +1,82 @@
 import React, { useState, useEffect } from "react";
-import * as XLSX from "xlsx";
-import { FiUpload, FiTrash2 } from "react-icons/fi";
+import { FiUpload, FiTrash2, FiCheckCircle, FiAlertCircle, FiInfo, FiBook, FiUser } from "react-icons/fi";
+import FileUploader from "../../component/FileUploader";
 
 function Questions() {
   const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
+  // ✅ NEW: Subject and Teacher states
+  const [subjectName, setSubjectName] = useState("");
+  const [teacherEmail, setTeacherEmail] = useState("");
+  const [teacherName, setTeacherName] = useState("");
+
+  // Read from localStorage (set by login)
+  const [nameFromStorage] = useState(localStorage.getItem("name") || "");
+  const [emailFromStorage] = useState(localStorage.getItem("email") || "");
   // Function to create an empty new question template
   const createNewQuestion = () => ({
     id: Math.random().toString(36).substr(2, 9),
     questionText: "",
-    options: ["", ""], // minimum two options
-    correctAnswerIndex: 0,
+    options: ["", ""],
+    correctIdx: 0,
   });
 
   // Questions state with localStorage initialization
   const [questions, setQuestions] = useState(() => {
     const saved = localStorage.getItem("questions");
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.questions || [createNewQuestion()];
+      } catch {
+        return [createNewQuestion()];
+      }
+    }
     return [createNewQuestion()];
   });
 
   const [importStatus, setImportStatus] = useState(null);
+  const [submitStatus, setSubmitStatus] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState({});
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [subjectErrors, setSubjectErrors] = useState({});
 
-  // Persist questions in localStorage on change
+  // Persist questions AND metadata in localStorage
   useEffect(() => {
-    localStorage.setItem("questions", JSON.stringify(questions));
-  }, [questions]);
+    const dataToSave = {
+      questions,
+      subjectName,
+    };
+    localStorage.setItem("questions", JSON.stringify(dataToSave));
+  }, [questions, subjectName]);
+
+
+  // Load saved metadata on mount
+  useEffect(() => {
+    if (nameFromStorage) setTeacherName(nameFromStorage);
+    if (emailFromStorage) setTeacherEmail(emailFromStorage);
+
+    const saved = localStorage.getItem("questions");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setSubjectName(parsed.subjectName || "");
+        setQuestions(parsed.questions || [createNewQuestion()]);
+      } catch (e) {
+        console.error("Error parsing saved data:", e);
+      }
+    }
+  }, []);
+
+  const validateMetadata = () => {
+    const newErrors = {};
+    if (!subjectName.trim()) {
+      newErrors.subjectName = "Subject name is required";
+    }
+    setSubjectErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
   // Validate a single question fields
   const validateQuestion = (q, qIndex, baseErrors = {}) => {
@@ -42,7 +91,6 @@ function Questions() {
       newErrors[qIndex].questionText = null;
     }
 
-    // At least two filled options required
     if (q.options.slice(0, 2).some((opt) => !opt || !opt.trim())) {
       newErrors[qIndex] = {
         ...newErrors[qIndex],
@@ -56,7 +104,7 @@ function Questions() {
     return newErrors;
   };
 
-  // Validate all questions; set errors state; return overall validity
+  // Validate all questions
   const validateAllQuestions = (qArr) => {
     let isValid = true;
     const newErrors = {};
@@ -68,7 +116,7 @@ function Questions() {
     return isValid;
   };
 
-  // Handler for changing question text
+  // Handler functions
   const handleQuestionChange = (qIndex, value) => {
     const newQuestions = [...questions];
     newQuestions[qIndex].questionText = value;
@@ -76,7 +124,6 @@ function Questions() {
     setErrors(validateQuestion(newQuestions[qIndex], qIndex, errors));
   };
 
-  // Handler for changing options text
   const handleOptionChange = (qIndex, oIndex, value) => {
     const newQuestions = [...questions];
     newQuestions[qIndex].options[oIndex] = value;
@@ -84,14 +131,12 @@ function Questions() {
     setErrors(validateQuestion(newQuestions[qIndex], qIndex, errors));
   };
 
-  // Set the correct answer index for a question
-  const setCorrectAnswer = (qIndex, oIndex) => {
+  const setCorrect = (qIndex, oIndex) => {
     const newQuestions = [...questions];
-    newQuestions[qIndex].correctAnswerIndex = oIndex;
+    newQuestions[qIndex].correctIdx = oIndex;
     setQuestions(newQuestions);
   };
 
-  // Add an option to a question (max 4)
   const addOption = (qIndex) => {
     const newQuestions = [...questions];
     if (newQuestions[qIndex].options.length < 4) {
@@ -101,56 +146,90 @@ function Questions() {
     }
   };
 
-  // Remove an option from a question (min 2 options)
   const removeOption = (qIndex, oIndex) => {
     const newQuestions = [...questions];
     if (newQuestions[qIndex].options.length > 2) {
       newQuestions[qIndex].options.splice(oIndex, 1);
-
-      // Adjust correctAnswerIndex if needed
-      if (newQuestions[qIndex].correctAnswerIndex === oIndex) {
-        newQuestions[qIndex].correctAnswerIndex = 0;
-      } else if (newQuestions[qIndex].correctAnswerIndex > oIndex) {
-        newQuestions[qIndex].correctAnswerIndex--;
+      if (newQuestions[qIndex].correctIdx === oIndex) {
+        newQuestions[qIndex].correctIdx = 0;
+      } else if (newQuestions[qIndex].correctIdx > oIndex) {
+        newQuestions[qIndex].correctIdx--;
       }
-
       setQuestions(newQuestions);
       setErrors(validateQuestion(newQuestions[qIndex], qIndex, errors));
     }
   };
 
-  // Add a new empty question
   const addQuestion = () => {
     setQuestions([...questions, createNewQuestion()]);
   };
 
-  // Delete a question (cannot delete if only one left)
   const deleteQuestion = (qIndex) => {
     if (questions.length === 1) return;
     const newQuestions = [...questions];
     newQuestions.splice(qIndex, 1);
     setQuestions(newQuestions);
 
-    // Remove errors for deleted question and reset errors
     const newErrors = { ...errors };
     delete newErrors[qIndex];
     setErrors(newErrors);
   };
 
-  // Submit all questions to backend
+  const clearAll = () => {
+    setShowClearConfirm(true);
+  };
+
+  const handleConfirmClear = () => {
+    setQuestions([createNewQuestion()]);
+    setSubjectName("");
+    setTeacherEmail("");
+    setTeacherName("");
+    setErrors({});
+    setSubjectErrors({});
+    setImportStatus(null);
+    setSubmitStatus(null);
+    localStorage.removeItem("questions");
+    setShowClearConfirm(false);
+  };
+
+  // ✅ ENHANCED: Submit with subject & teacher metadata
   const handleSubmit = async () => {
-    if (!validateAllQuestions(questions)) {
-      alert("Please fix all errors before submitting");
+    if (!validateMetadata()) {
+      setSubmitStatus({
+        type: "error",
+        message: "Please enter subject name before submitting",
+      });
       return;
     }
+
+    if (!validateAllQuestions(questions)) {
+      setSubmitStatus({
+        type: "error",
+        message: "Please fix all errors before submitting"
+      });
+      return;
+    }
+
     setIsSubmitting(true);
+    setSubmitStatus(null);
 
     try {
       const url = `${API_BASE}/api/questions/bulk`;
+      const payload = {
+        questions,
+        subjectName: subjectName.trim(),
+        teacherEmail: teacherEmail.trim(), // from localStorage
+        teacherName: teacherName.trim(),
+        institute: localStorage.getItem("institute") || null,
+        branch: localStorage.getItem("branch") || null,
+        timestamp: new Date().toISOString(),
+      };
+
+
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questions }),
+        body: JSON.stringify(payload),
       });
 
       const text = await res.text();
@@ -163,313 +242,318 @@ function Questions() {
 
       if (!res.ok) {
         const message = body?.message || body || "Submit failed";
-        alert(`Submit failed: ${message}`);
+        setSubmitStatus({
+          type: "error",
+          message: body?.errors ? body.errors.join('\n') : message
+        });
         return;
       }
 
-      alert("Questions saved successfully!");
+      setSubmitStatus({
+        type: "success",
+        message: `✅ Saved ${questions.length} questions for "${subjectName}" by ${teacherName || teacherEmail}! 🎉`
+      });
+
       setQuestions([createNewQuestion()]);
       setErrors({});
+      setSubjectErrors({});
       localStorage.removeItem("questions");
+
+      setTimeout(() => setSubmitStatus(null), 5000);
+
     } catch (err) {
-      alert("Network error: " + err.message);
+      setSubmitStatus({
+        type: "error",
+        message: `Network error: ${err.message}`
+      });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Handle Excel file import and auto-submit
-  const handleFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setImportStatus("Parsing file...");
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: "array" });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
-
-      // Map Excel rows to question objects
-      const importedQuestions = rawJson.map((row) => {
-        const qText = row.Question ? String(row.Question).trim() : "";
-
-        const optsRaw = [
-          row.Option1 ?? "",
-          row.Option2 ?? "",
-          row.Option3 ?? "",
-          row.Option4 ?? "",
-        ].map((o) => (o === undefined || o === null ? "" : String(o).trim()));
-
-        // Filter out empty options, but ensure at least 2 options
-        const optsFiltered = optsRaw.filter((o) => o !== "");
-        while (optsFiltered.length < 2) optsFiltered.push("");
-
-        // Determine correctAnswerIndex using numeric or text match
-        let correctIndex = 0;
-        const ca = row.CorrectAnswer;
-        if (ca !== undefined && ca !== null && String(ca).trim() !== "") {
-          const caStr = String(ca).trim();
-          const asNum = Number(caStr);
-          if (!Number.isNaN(asNum)) {
-            if (asNum >= 1 && asNum <= optsFiltered.length)
-              correctIndex = asNum - 1;
-            else if (asNum >= 0 && asNum < optsFiltered.length) correctIndex = asNum;
-          } else {
-            const found = optsFiltered.findIndex(
-              (o) => o.toLowerCase() === caStr.toLowerCase()
-            );
-            if (found !== -1) correctIndex = found;
-          }
-        }
-
-        return {
-          id: Math.random().toString(36).substr(2, 9),
-          questionText: qText,
-          options: optsFiltered,
-          correctAnswerIndex: correctIndex,
-        };
-      });
-
-      const importArr = importedQuestions.length > 0 ? importedQuestions : [createNewQuestion()];
-      setQuestions(importArr);
-      setImportStatus(`Imported ${importedQuestions.length} questions. Sending to server...`);
-      validateAllQuestions(importArr);
-
-      // Auto-submit imported questions
-      try {
-        const url = `${API_BASE}/api/questions/bulk`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ questions: importArr }),
-        });
-        const text = await res.text();
-
-        let body = null;
-        try {
-          body = JSON.parse(text);
-        } catch (err) {
-          body = text;
-        }
-
-        if (!res.ok) {
-          setImportStatus(`Import parsed but failed to save: ${body?.message || body || res.status}`);
-          return;
-        }
-
-        setImportStatus(`Import ${importedQuestions.length} questions.`);
-        setTimeout(() => setImportStatus(null), 3000);
-      } catch (err) {
-        setImportStatus(`Import parsed but failed to save: ${err.message}`);
-      }
-    } catch (err) {
-      setImportStatus("Failed to parse Excel file. Make sure the headers are correct.");
-    } finally {
-      setTimeout(() => setImportStatus(null), 4000);
-    }
-  };
-
-  // Clear all questions and reset states
-  const clearAll = () => {
-    setQuestions([createNewQuestion()]);
-    setErrors({});
-    setImportStatus(null);
-    localStorage.removeItem("questions");
-  };
-
-  // Determine if submit button should be disabled (any errors present)
-  const isSubmitDisabled = questions.some(
-    (q, qi) => errors[qi]?.questionText || errors[qi]?.options
-  );
+  const isSubmitDisabled =
+    !subjectName.trim() ||
+    questions.some((q, qi) => errors[qi]?.questionText || errors[qi]?.options);
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-8 bg-gray-50 min-h-screen">
-      {/* Import and Clear controls */}
-      <div className="flex items-center justify-between bg-gradient-to-r from-indigo-900 to-indigo-700 p-4 rounded-lg shadow-lg">
-        <div className="flex items-center space-x-4">
-          <label
-            htmlFor="excelUpload"
-            className="group cursor-pointer flex items-center gap-2 rounded-md px-4 py-2 bg-teal-400 text-white hover:bg-teal-500 hover:shadow-lg transform hover:scale-105 transition-all duration-200"
-            title="Upload questions from Excel"
-          >
-            <FiUpload size={20} className="group-hover:scale-110 transition-transform" />
-            Import Questions
-          </label>
-          <input
-            id="excelUpload"
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={handleFile}
-            className="hidden"
-          />
-          <button
-            type="button"
-            onClick={clearAll}
-            className="group flex items-center gap-2 rounded-md px-4 py-2 bg-red-400 text-white hover:bg-red-500 hover:shadow-lg transform hover:scale-105 transition-all duration-200"
-          >
-            <FiTrash2 size={20} className="group-hover:scale-110 transition-transform" />
-            Clear All
-          </button>
+    <>
+      <div className="max-w-6xl mx-auto p-6 space-y-8 bg-gradient-to-br from-gray-50 to-blue-50 min-h-screen">
+
+        {/* Subject only (no teacher inputs) */}
+        <div className="bg-gradient-to-r from-purple-500 to-indigo-600 p-8 rounded-2xl shadow-2xl text-white">
+          <h2 className="text-2xl font-bold mb-6 flex items-center gap-3">
+            <FiBook size={28} /> Subject & Teacher
+          </h2>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold mb-2">Subject Name *</label>
+              <input
+                type="text"
+                value={subjectName}
+                onChange={(e) => setSubjectName(e.target.value)}
+                placeholder="e.g., Mathematics, Physics, History"
+                className={`w-full p-4 rounded-xl bg-white/20 backdrop-blur-sm border-2 text-white placeholder-white/70 focus:ring-4 focus:ring-white/50 focus:border-white/50 transition-all duration-300 ${subjectErrors.subjectName
+                    ? "border-red-400 bg-red-500/20"
+                    : "border-white/30 hover:border-white/50"
+                  }`}
+              />
+              {subjectErrors.subjectName && (
+                <p className="text-red-200 text-sm mt-1 flex items-center gap-1">
+                  <FiAlertCircle size={14} /> {subjectErrors.subjectName}
+                </p>
+              )}
+            </div>
+
+            <div className="text-sm text-white/80">
+              Logged in as:{" "}
+              <span className="font-bold">
+                {teacherName || teacherEmail} ({teacherEmail})
+              </span>
+            </div>
+          </div>
         </div>
 
-        <div className="text-gray-100 font-semibold">
-          Total Questions: {questions.length}
+
+        {/* Enhanced Header */}
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 bg-gradient-to-r from-indigo-900 to-indigo-700 p-6 rounded-xl shadow-2xl text-white">
+          <div className="flex items-center space-x-4 flex-1">
+            <FileUploader
+              onQuestionsImported={(importedQuestions) => {
+                setQuestions(importedQuestions.map(q => ({
+                  ...q,
+                  id: Math.random().toString(36).substr(2, 9)
+                })));
+                setImportStatus(`✅ Imported ${importedQuestions.length} questions! 🎉`);
+                setTimeout(() => setImportStatus(null), 4000);
+              }}
+            />
+            <button
+              type="button"
+              onClick={clearAll}
+              className="group flex items-center gap-2 rounded-lg px-6 py-3 bg-red-500/90 backdrop-blur-sm text-white hover:bg-red-600 hover:shadow-xl transform hover:scale-105 transition-all duration-300 shadow-lg"
+            >
+              <FiTrash2 size={20} className="group-hover:scale-110 transition-transform" />
+              Clear All
+            </button>
+          </div>
+          <div className="text-lg font-bold bg-white/20 px-4 py-2 rounded-lg">
+            📊 Total: {questions.length} Questions
+          </div>
+        </div>
+
+        {/* Status Messages */}
+        {(importStatus || submitStatus) && (
+          <div className="space-y-2">
+            {importStatus && <StatusMessage message={importStatus} type="info" />}
+            {submitStatus && (
+              <StatusMessage
+                message={submitStatus.message}
+                type={submitStatus.type}
+                icon={submitStatus.type === "success" ? FiCheckCircle : FiAlertCircle}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Questions List */}
+        <div className="space-y-6">
+          {questions.map((q, qi) => (
+            <QuestionCard
+              key={q.id || qi}
+              question={q}
+              index={qi}
+              errors={errors[qi]}
+              onQuestionChange={handleQuestionChange}
+              onOptionChange={handleOptionChange}
+              onCorrectAnswerChange={setCorrect}
+              onAddOption={addOption}
+              onRemoveOption={removeOption}
+              onDelete={deleteQuestion}
+              canDelete={questions.length > 1}
+            />
+          ))}
+        </div>
+
+        {/* Enhanced Action Buttons */}
+        <div className="flex flex-col sm:flex-row gap-4 justify-end p-8 bg-white/50 backdrop-blur-sm rounded-2xl shadow-xl border border-white/30">
+          <button
+            type="button"
+            onClick={addQuestion}
+            className="flex-1 sm:flex-none bg-gradient-to-r from-teal-500 to-teal-600 text-white px-8 py-4 rounded-xl hover:from-teal-600 hover:to-teal-700 hover:shadow-2xl transform hover:scale-105 transition-all duration-300 font-semibold text-lg"
+          >
+            ➕ Add New Question
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSubmitting || isSubmitDisabled}
+            className={`flex items-center justify-center gap-3 px-12 py-4 rounded-xl text-lg font-bold shadow-2xl transition-all duration-300 transform ${isSubmitting || isSubmitDisabled
+                ? "bg-gray-400 cursor-not-allowed opacity-60"
+                : "bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 hover:shadow-3xl hover:scale-105 text-white"
+              }`}
+          >
+            {isSubmitting ? (
+              <>
+                <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Saving...
+              </>
+            ) : (
+              "💾 Save All Questions"
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Import status message */}
-      {importStatus && (
-        <div
-          className="bg-teal-100 text-teal-800 p-3 rounded-lg shadow-md transform animate-slide-in"
-          role="status"
-        >
-          {importStatus}
+      {/* Custom Clear Confirmation Modal */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-200">
+            <div className="text-center mb-8">
+              <FiAlertCircle size={56} className="mx-auto text-red-500 mb-4" />
+              <h2 className="text-2xl font-bold text-gray-900 mb-3">Clear All Questions?</h2>
+              <p className="text-gray-600 text-lg leading-relaxed">
+                This action cannot be undone. All unsaved questions will be permanently lost.
+              </p>
+            </div>
+            <div className="flex gap-4 pt-4">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="flex-1 px-8 py-4 bg-gray-100 hover:bg-gray-200 text-gray-900 rounded-xl font-semibold transition-all duration-200 shadow-md hover:shadow-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmClear}
+                className="flex-1 px-8 py-4 bg-red-500 hover:bg-red-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
+              >
+                Clear All
+              </button>
+            </div>
+          </div>
         </div>
       )}
+    </>
+  );
+}
 
-      {/* Questions list */}
-      {questions.map((q, qi) => (
-        <div
-          key={q.id || qi}
-          className="relative bg-blue-50 p-6 rounded-xl shadow-lg border border-blue-400 hover:shadow-2xl transform hover:-translate-y-1 hover:rotate-x-2 transition-all duration-300"
-          style={{ perspective: "1000px", transformStyle: "preserve-3d" }}
-        >
-          {questions.length > 1 && (
+// ✅ QuestionCard Component (Complete)
+const QuestionCard = ({
+  question,
+  index,
+  errors,
+  onQuestionChange,
+  onOptionChange,
+  onCorrectAnswerChange,
+  onAddOption,
+  onRemoveOption,
+  onDelete,
+  canDelete
+}) => (
+  <div className="group bg-white/70 backdrop-blur-sm p-8 rounded-2xl shadow-xl border border-blue-200 hover:shadow-2xl hover:border-blue-300 hover:-translate-y-2 transition-all duration-500 relative overflow-hidden">
+    <div className="absolute inset-0 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+    {canDelete && (
+      <button
+        onClick={() => onDelete(index)}
+        className="absolute top-4 right-4 z-10 bg-red-500/90 text-white rounded-full w-10 h-10 flex items-center justify-center hover:bg-red-600 shadow-lg transform hover:scale-110 transition-all duration-200 backdrop-blur-sm"
+        title="Delete question"
+      >
+        ×
+      </button>
+    )}
+
+    <div className="relative z-10 space-y-3 mb-6">
+      <label className="block text-xl font-bold text-gray-800 mb-2">
+        Q{index + 1}
+      </label>
+      <textarea
+        className={`w-full p-4 border-2 rounded-xl bg-white/50 backdrop-blur-sm text-lg placeholder-gray-500 focus:ring-4 focus:ring-blue-200 focus:border-blue-400 hover:shadow-lg transition-all duration-300 resize-vertical min-h-[100px] ${errors?.questionText
+            ? "border-red-400 bg-red-50/50"
+            : "border-blue-200 hover:border-blue-300"
+          }`}
+        value={question.questionText}
+        onChange={(e) => onQuestionChange(index, e.target.value)}
+        placeholder="Enter your question here..."
+        aria-invalid={!!errors?.questionText}
+      />
+      {errors?.questionText && (
+        <div className="flex items-center gap-2 text-red-600 text-sm bg-red-100 px-3 py-2 rounded-lg">
+          <FiAlertCircle size={16} />
+          {errors.questionText}
+        </div>
+      )}
+    </div>
+
+    <div className="relative z-10 space-y-3">
+      <label className="block text-lg font-semibold text-gray-800 mb-3">
+        Options
+      </label>
+      {question.options.map((opt, oi) => (
+        <div key={oi} className="flex items-start space-x-3 p-3 bg-white/60 rounded-xl hover:bg-white/80 transition-all duration-200">
+          <input
+            type="radio"
+            name={`correct-${index}`}
+            checked={question.correctIdx === oi}
+            onChange={() => onCorrectAnswerChange(index, oi)}
+            className="w-6 h-6 mt-0.5 text-teal-500 focus:ring-teal-500 mt-1 flex-shrink-0"
+          />
+          <input
+            type="text"
+            placeholder={`Option ${oi + 1}`}
+            value={opt}
+            onChange={(e) => onOptionChange(index, oi, e.target.value)}
+            className={`flex-grow px-4 py-3 border rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all duration-200 ${oi < 2 && !opt.trim()
+                ? "border-red-400 bg-red-50/50"
+                : "border-gray-200 hover:border-blue-300"
+              }`}
+          />
+          {oi > 1 && (
             <button
-              onClick={() => deleteQuestion(qi)}
-              className="absolute top-3 right-3 bg-red-400 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-red-500 hover:shadow-md transform hover:scale-110 transition-all duration-200"
-              title="Delete this question"
-              aria-label="Delete this question"
+              type="button"
+              onClick={() => onRemoveOption(index, oi)}
+              className="text-red-500 hover:text-red-600 p-2 -m-2 hover:bg-red-100 rounded-lg transition-all duration-200"
+              title="Remove option"
             >
-              &times;
+              <FiTrash2 size={18} />
             </button>
           )}
-
-          {/* Question text input */}
-          <div className="space-y-2">
-            <label
-              htmlFor={`question-${qi}`}
-              className="block text-gray-700 font-semibold"
-            >
-              Question
-            </label>
-            <textarea
-              id={`question-${qi}`}
-              className={`w-full p-3 border rounded-lg bg-white text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-400 focus:border-transparent hover:shadow-md transform hover:scale-[1.01] transition-all duration-200 resize-none ${errors[qi]?.questionText ? "border-red-400" : "border-blue-300"
-                }`}
-              value={q.questionText}
-              onChange={(e) => handleQuestionChange(qi, e.target.value)}
-              placeholder="Enter your question here..."
-              rows={3}
-              aria-required="true"
-              aria-invalid={!!errors[qi]?.questionText}
-            />
-            {errors[qi]?.questionText && (
-              <p className="text-red-400 text-sm">{errors[qi].questionText}</p>
-            )}
-          </div>
-
-          {/* Options and correct answer radio buttons */}
-          <div className="space-y-4 mt-4">
-            {q.options.map((opt, oi) => (
-              <div key={oi} className="flex items-center space-x-3 group">
-                <input
-                  type="radio"
-                  name={`correct-${qi}`}
-                  checked={q.correctAnswerIndex === oi}
-                  onChange={() => setCorrectAnswer(qi, oi)}
-                  className="w-5 h-5 text-teal-400 focus:ring-teal-400 cursor-pointer"
-                  aria-label={`Mark option ${oi + 1} as correct`}
-                />
-                <input
-                  type="text"
-                  placeholder={`Option ${oi + 1}`}
-                  value={opt}
-                  onChange={(e) => handleOptionChange(qi, oi, e.target.value)}
-                  className={`flex-grow px-3 py-2 border rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-blue-400 focus:border-transparent hover:shadow-md transition-all duration-200 ${oi < 2 && !opt.trim() ? "border-red-400" : "border-blue-300"
-                    }`}
-                  required={oi < 2}
-                  aria-required={oi < 2}
-                  aria-invalid={oi < 2 && !opt.trim()}
-                />
-                {oi > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => removeOption(qi, oi)}
-                    className="text-red-400 hover:text-red-500 transform hover:scale-110 transition-all duration-200"
-                    title="Remove option"
-                    aria-label="Remove this option"
-                  >
-                    <FiTrash2 size={20} />
-                  </button>
-                )}
-              </div>
-            ))}
-
-            {errors[qi]?.options && (
-              <p className="text-red-400 text-sm">{errors[qi].options}</p>
-            )}
-
-            {q.options.length < 4 && (
-              <button
-                type="button"
-                onClick={() => addOption(qi)}
-                className="text-teal-400 hover:text-teal-500 font-semibold transform hover:scale-105 transition-all duration-200"
-                aria-label="Add Option"
-              >
-                + Add Option
-              </button>
-            )}
-          </div>
         </div>
       ))}
 
-      {/* Action buttons */}
-      <div className="flex space-x-4 justify-end">
+      {errors?.options && (
+        <div className="flex items-center gap-2 text-red-600 text-sm bg-red-100 px-3 py-2 rounded-lg">
+          <FiAlertCircle size={16} />
+          {errors.options}
+        </div>
+      )}
+
+      {question.options.length < 4 && (
         <button
           type="button"
-          onClick={addQuestion}
-          className="bg-teal-400 text-white px-6 py-3 rounded-lg hover:bg-teal-500 hover:shadow-lg transform hover:scale-105 transition-all duration-200"
+          onClick={() => onAddOption(index)}
+          className="text-teal-600 hover:text-teal-700 font-semibold text-lg hover:underline flex items-center gap-2 pt-2"
         >
-          + Add Question
+          ➕ Add Option
         </button>
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={isSubmitting || isSubmitDisabled}
-          className={`flex items-center justify-center px-6 py-3 rounded-lg text-white transition-all duration-200 ${isSubmitting || isSubmitDisabled
-              ? "bg-indigo-400 opacity-50 cursor-not-allowed"
-              : "bg-indigo-600 hover:bg-indigo-700 hover:shadow-lg transform hover:scale-105"
-            }`}
-        >
-          {isSubmitting ? (
-            <>
-              <svg className="animate-spin h-5 w-5 mr-2" viewBox="0 0 24 24">
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8v8H4z"
-                />
-              </svg>
-              Saving...
-            </>
-          ) : (
-            "Save All Questions"
-          )}
-        </button>
-      </div>
+      )}
     </div>
-  );
-}
+  </div>
+);
+
+// ✅ StatusMessage Component (Complete)
+const StatusMessage = ({ message, type = "info", icon: Icon }) => (
+  <div className={`p-4 rounded-xl shadow-lg transform transition-all duration-300 ${type === "success"
+      ? "bg-green-100 border-2 border-green-400 text-green-800"
+      : type === "error"
+        ? "bg-red-100 border-2 border-red-400 text-red-800 animate-pulse"
+        : "bg-blue-100 border-2 border-blue-400 text-blue-800"
+    }`}>
+    <div className="flex items-center gap-3">
+      {Icon ? <Icon size={20} /> : <FiInfo size={20} />}
+      <span className="font-medium">{message}</span>
+    </div>
+  </div>
+);
 
 export default Questions;

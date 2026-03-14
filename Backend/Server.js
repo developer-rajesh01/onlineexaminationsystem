@@ -20,28 +20,26 @@ import updateTestStatuses from "./helpers/statusUpdater.js";
 
 const app = express();
 
-// simple request logger
+// Simple request logger
 app.use((req, res, next) => {
   console.log(new Date().toISOString(), req.method, req.originalUrl);
   next();
 });
 
-// body parsers
+// Body parsers
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// CORS config - allow credentials and common headers
+// CORS config - dynamic origin from env
 const corsOptions = {
-  origin: "http://localhost:3000",
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   credentials: true,
 };
 app.use(cors(corsOptions));
-// after you define corsOptions and call app.use(cors(corsOptions))
 
-// remove any existing app.options("/*", ...) or app.options("*", ...)
-// and add this instead:
+// Enhanced OPTIONS preflight handling
 app.use((req, res, next) => {
   if (req.method === "OPTIONS") {
     res.setHeader("Access-Control-Allow-Origin", corsOptions.origin);
@@ -53,53 +51,77 @@ app.use((req, res, next) => {
   next();
 });
 
-// connect db
+// Connect DB
 connectDB().catch((err) => {
   console.error("DB connect error:", err);
   process.exit(1);
 });
 
-// mount routers
+// Health check endpoint
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "OK",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    env: process.env.NODE_ENV || "development"
+  });
+});
+
+// Root endpoint
+app.get("/", (req, res) => {
+  res.send("✅ Online Examination System API is running...");
+});
+
+// Mount routers (FIXED ORDER: most specific first)
 app.use("/api/auth", authRoutes);
 app.use("/api/exams", examRoutes);
 app.use("/api/questions", questionRoutes);
 app.use("/api/results", resultRoutes);
-
-// mount attemptsRouter BEFORE testRoutes
-app.use("/api", attemptsRouter);
-
-// tests router
-app.use("/api/tests", testRoutes);
-
-app.get("/", (req, res) => {
-  res.send("✅ Online Examination System API is running...");
-});
+app.use("/api/tests", testRoutes);        // tests before attempts
+app.use("/api/attempts", attemptsRouter); // specific attempts path
 
 // 404 for unmatched API routes
 app.use((req, res) => {
   res.status(404).json({ message: `Cannot ${req.method} ${req.originalUrl}` });
 });
 
+// Global error handler (must be last)
 app.use(errorHandler);
 
 const server = http.createServer(app);
 
 const io = new IOServer(server, {
-  cors: { origin: "http://localhost:3000", methods: ["GET", "POST"], credentials: true }
+  cors: {
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    methods: ["GET", "POST"],
+    credentials: true
+  }
 });
 
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
   socket.on("joinTest", (testId) => {
-    if (!testId) return;
+    if (!testId) {
+      socket.emit("error", { message: "Test ID required" });
+      return;
+    }
     socket.join(`test:${testId}`);
+    console.log(`Socket ${socket.id} joined test:${testId}`);
+    socket.emit("joinedTest", { testId });
   });
 
   socket.on("joinAudience", (aud) => {
-    if (!aud) return;
-    const tokens = String(aud).split(",").map((t) => t.trim()).filter(Boolean);
-    tokens.forEach((t) => socket.join(`audience:${t}`));
+    if (!aud) {
+      socket.emit("error", { message: "Audience ID required" });
+      return;
+    }
+    const tokens = String(aud).split(",").map(t => t.trim()).filter(Boolean);
+    tokens.forEach(t => {
+      socket.join(`audience:${t}`);
+      console.log(`Socket ${socket.id} joined audience:${t}`);
+    });
+    socket.emit("joinedAudience", { audiences: tokens });
   });
 
   socket.on("disconnect", (reason) => {
@@ -111,17 +133,43 @@ app.set("io", io);
 
 const PORT = process.env.PORT || 5000;
 
+// Cron job scheduling
+console.log("⏰ Status updater cron scheduled every minute");
+cron.schedule("*/1 * * * *", async () => {
+  try {
+    await updateTestStatuses(io, { emitWindowMinutes: 5 });
+  } catch (err) {
+    console.error("Cron status updater error:", err);
+  }
+});
+
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-
-  cron.schedule("*/1 * * * *", async () => {
-    try {
-      await updateTestStatuses(io, { emitWindowMinutes: 5 });
-    } catch (err) {
-      console.error("Cron status updater error:", err);
-    }
-    console.log("⏰ Status updater cron scheduled to run every minute.");
-  });
+  console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
 });
+
+// Graceful shutdown
+const gracefulShutdown = (signal) => {
+  console.log(`\n🛑 Received ${signal}. Closing server gracefully...`);
+  io.close(() => {
+    console.log("Socket.IO server closed.");
+  });
+  server.close((err) => {
+    if (err) {
+      console.error("Server close error:", err);
+      process.exit(1);
+    }
+    console.log("HTTP server closed.");
+    process.exit(0);
+  });
+  // Force close after 10s
+  setTimeout(() => {
+    console.error("Force closing server...");
+    process.exit(1);
+  }, 10000);
+};
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 export default app;

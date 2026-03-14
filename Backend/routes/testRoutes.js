@@ -1,5 +1,6 @@
 import express from "express";
 import Test from "../models/Test.js";
+import mongoose from 'mongoose'; 
 
 const router = express.Router();
 
@@ -33,143 +34,70 @@ function deriveDateAndTime(d) {
     };
 }
 
-// Create new test (with validation, timestamps, and socket emit)
 router.post("/", async (req, res) => {
     try {
-        const {
-            title,
-            duration, // minutes
-            startTimestamp, // optional ISO string
-            startDate, // optional YYYY-MM-DD
-            startTime, // optional HH:MM
-            endTimestamp, // optional override ISO
-            targetAudience,
-            courseName, // optional - prefer this if provided
-            author,
-            passMarks,
-            totalMarks,
-            institute,
-            questions = [],
-            facultyEmail,
-        } = req.body;
+        const { title, duration, startTimestamp, startDate, startTime, targetAudience, institute, author, sections = [], facultyEmail } = req.body;
 
-        // required checks
-        if (
-            !title ||
-            !duration ||
-            (!startTimestamp && !(startDate && startTime)) ||
-            !totalMarks ||
-            !targetAudience // keep requiring targetAudience for backwards compat, we will also set courseName
-        ) {
-            return res.status(400).json({
-                message:
-                    "Missing required fields. Required: title, duration, totalMarks, targetAudience and either startTimestamp OR (startDate + startTime).",
-            });
-        }
+        console.log("✅ RECEIVED:", { title: title?.slice(0, 30), duration, targetAudience: targetAudience?.slice(0, 30), sections: sections?.length });
 
-        // compute start timestamp (Date object)
-        let start;
-        if (startTimestamp) {
-            start = new Date(startTimestamp);
-            if (isNaN(start)) return res.status(400).json({ message: "Invalid startTimestamp" });
-        } else {
-            const isoLocal = `${startDate}T${startTime}:00`;
-            start = new Date(isoLocal);
-            if (isNaN(start)) return res.status(400).json({ message: "Invalid startDate/startTime" });
-        }
-
-        // compute end timestamp (duration preferred, else explicit endTimestamp)
-        let end;
-        const dur = Number(duration);
-        if (Number.isNaN(dur) || dur <= 0) return res.status(400).json({ message: "Invalid duration" });
-
-        if (endTimestamp) {
-            end = new Date(endTimestamp);
-            if (isNaN(end)) return res.status(400).json({ message: "Invalid endTimestamp" });
-        } else {
-            end = new Date(start.getTime() + dur * 60000);
-        }
-
-        // passMarks validation: must be less than totalMarks when provided
-        if (passMarks !== undefined && passMarks !== null) {
-            const pm = Number(passMarks);
-            const tm = Number(totalMarks);
-            if (Number.isNaN(pm) || Number.isNaN(tm))
-                return res.status(400).json({ message: "Invalid passMarks or totalMarks" });
-            if (pm >= tm) return res.status(400).json({ message: "passMarks must be smaller than totalMarks" });
-        }
-
-        const now = new Date();
-        let status = "upcoming";
-        if (now >= start && now < end) status = "ongoing";
-        if (now >= end) status = "completed";
-
+        let start = startTimestamp ? new Date(startTimestamp) : new Date(`${startDate}T${startTime}:00`);
+        let end = new Date(start.getTime() + Number(duration) * 60000);
         const { startDate: derivedDate, startTime: derivedTime } = deriveDateAndTime(start);
-
-        // prefer explicit courseName, otherwise copy from targetAudience
-        const finalCourseName = (courseName || targetAudience || "").toString();
 
         const testDoc = new Test({
             title,
-            duration: dur,
+            duration: Number(duration),
             startTimestamp: start,
             endTimestamp: end,
             startDate: derivedDate,
             startTime: derivedTime,
             targetAudience,
-            courseName: finalCourseName,
+            courseName: targetAudience,
             author,
-            passMarks: passMarks !== undefined ? Number(passMarks) : undefined,
-            totalMarks: Number(totalMarks),
             institute,
-            questions,
-            facultyEmail,
-            status,
+            facultyEmail: facultyEmail || author || "admin@exam.com",
+            status: computeLiveStatus(start, end),
+            // ✅ FIXED ObjectId GENERATION:
+            sections: sections.map((sec, secIdx) => {
+                console.log(`🔍 Section ${secIdx}:`, sec.questions.map(q => ({
+                    text: q.questionText.slice(0, 30),
+                    correctIdx: q.correctIdx,  // ← DEBUG THIS!
+                    hasOptions: (q.options || []).length
+                })));
+
+                return {
+                    name: sec.name || 'General',
+                    points: Number(sec.points || sec.marks || 10),
+                    questions: (sec.questions || []).map((q, qIdx) => {
+                        const options = (q.options || []).map((opt, optIdx) => ({
+                            text: opt.text || opt || `Option ${optIdx + 1}`,
+                            _id: new mongoose.Types.ObjectId()
+                        }));
+
+                        // ✅ FIXED: Use correctIdx or default 2 (C option)
+                        const correctIndex = q.correctIdx !== undefined ? q.correctIdx : 2;
+                        console.log(`Q${qIdx}: correctIdx=${q.correctIdx} → using ${correctIndex}`);
+
+                        return {
+                            questionText: q.questionText || '',
+                            options,
+                            correctOptionId: options[correctIndex]?._id || options[0]._id
+                        }
+                    })
+                }
+            }),
+
+            totalMarks: sections.reduce((sum, sec) => sum + Number(sec.points || sec.marks || 10), 0) || 10
         });
 
         const saved = await testDoc.save();
-
-        const payload = {
-            ...saved.toObject(),
-            // ensure courseName present in payload for clients
-            courseName: saved.courseName || saved.targetAudience,
-            liveStatus: computeLiveStatus(saved.startTimestamp, saved.endTimestamp),
-            serverTime: new Date().toISOString(),
-        };
-
-        try {
-            const io = req.app.get("io");
-            if (io) {
-                // emit to both courseName and targetAudience rooms so older clients still receive messages
-                const audiences = new Set();
-                if (saved.targetAudience) {
-                    String(saved.targetAudience)
-                        .split(",")
-                        .map((a) => a.trim())
-                        .filter(Boolean)
-                        .forEach((a) => audiences.add(a));
-                }
-                if (saved.courseName) {
-                    String(saved.courseName)
-                        .split(",")
-                        .map((a) => a.trim())
-                        .filter(Boolean)
-                        .forEach((a) => audiences.add(a));
-                }
-
-                audiences.forEach((a) => io.to(`audience:${a}`).emit("testCreated", payload));
-                io.to(`test:${saved._id}`).emit("testCreated", payload);
-            }
-        } catch (emitErr) {
-            console.error("Error emitting testCreated:", emitErr);
-        }
-
-        return res.status(201).json({ success: true, test: saved });
+        res.status(201).json({ success: true, test: saved });
     } catch (error) {
-        console.error("Create test error:", error);
-        return res.status(500).json({ message: error.message });
+        console.error("SAVE ERROR:", error);
+        res.status(500).json({ message: error.message });
     }
 });
+
 
 // List tests with optional filtering; returns liveStatus + serverTime for client sync
 router.get("/", async (req, res) => {
@@ -198,6 +126,11 @@ router.get("/", async (req, res) => {
 // Get test by id (with serverTime and liveStatus)
 router.get("/:id", async (req, res) => {
     try {
+        const { id } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: `Invalid test ID: ${id}` });
+        }
+
         const test = await Test.findById(req.params.id).lean();
         if (!test) return res.status(404).json({ message: "Test not found" });
 

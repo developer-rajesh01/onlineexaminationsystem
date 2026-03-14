@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect } from "react";
 import { FiUpload, FiTrash2, FiPlusCircle } from "react-icons/fi";
 import * as XLSX from "xlsx";
 import { useNavigate, useLocation, useParams } from "react-router-dom";
+import FileUploader from "../../component/FileUploader";
+// import DatabaseQuestions from "./DatabaseQuestionSelector"; 
+import DatabaseQuestionSelector from "./DatabaseQuestionSelector";
 
 const QUESTIONS_PER_PAGE = 10;
 
@@ -40,7 +43,9 @@ function CreateTest() {
     const { id } = useParams();
 
     // detect if editing (so we skip localStorage for edit mode)
-    const isEditMode = Boolean(id || location?.state?.task);
+    const urlId = useParams().id;  // Get id IMMEDIATELY
+    const incomingTask = location?.state?.task;
+    const isEditMode = Boolean(urlId || incomingTask);
 
     // use localStorage only if NOT editing
     const [quiz, setQuiz] = useState(() => {
@@ -53,11 +58,11 @@ function CreateTest() {
                 targetAudience: "",
                 author: "",
                 passMarks: "",
-                totalMarks: "",
                 institute: "",
             };
         }
         const savedQuiz = localStorage.getItem("quizData");
+
         return savedQuiz
             ? JSON.parse(savedQuiz)
             : {
@@ -74,7 +79,30 @@ function CreateTest() {
     });
 
     const [startTimestampInput, setStartTimestampInput] = useState(""); // datetime-local value (for startTimestamp)
-    const [institute, setInstitute] = useState("");
+    const [institute, setInstitute] = useState(() => {
+        return localStorage.getItem("institute") || "My Institute";
+    });
+    // ✅ SECTIONS STATE - NEW!
+    const [sections, setSections] = useState(() => {
+        if (isEditMode) return [{ name: "General", marks: 10, questions: [] }];
+
+        try {
+            const saved = localStorage.getItem("sectionsData");
+            return saved ? JSON.parse(saved) : [{ name: "General", marks: 10, questions: [] }];
+        } catch {
+            return [{ name: "General", marks: 10, questions: [] }];
+        }
+    });
+    const [currentSectionIndex, setCurrentSectionIndex] = useState(() => {
+        if (isEditMode) return 0;
+        try {
+            const saved = localStorage.getItem("currentSectionIndex");
+            return saved && !isNaN(parseInt(saved)) ? parseInt(saved) : 0;
+        } catch {
+            return 0;
+        }
+    });
+
 
     // Load institute & author from localStorage
     useEffect(() => {
@@ -88,16 +116,24 @@ function CreateTest() {
         setInstitute(inst);
     }, []);
 
-    // questions initial state: use localStorage only when NOT editing
-    const [questions, setQuestions] = useState(() => {
-        if (isEditMode) {
-            return [{ questionText: "", options: ["", ""], correctIdx: 0 }];
+    // ✅ CURRENT SECTION QUESTIONS ONLY
+    const currentSection = sections[currentSectionIndex];
+    const [currentQuestions, setCurrentQuestions] = useState([{ questionText: "", options: ["", ""], correctIdx: 0 }]);
+    useEffect(() => {
+        // 🔥 ONLY sync if currentQuestions doesn't match section!
+        const sectionQuestionsFlat = currentSection.questions.map(q => ({
+            questionText: q.questionText || "",
+            options: Array.isArray(q.options)
+                ? q.options.map(opt => opt.text || opt || "")
+                : q.options || [""],
+            correctIdx: q.correctIdx || 0
+        }));
+
+        // ✅ ONLY update if different length OR first load
+        if (currentQuestions.length !== sectionQuestionsFlat.length || currentSectionIndex === 0) {
+            setCurrentQuestions(sectionQuestionsFlat);
         }
-        const savedQuestions = localStorage.getItem("questionsData");
-        return savedQuestions
-            ? JSON.parse(savedQuestions)
-            : [{ questionText: "", options: ["", ""], correctIdx: 0 }];
-    });
+    }, [currentSectionIndex, currentSection.questions.length]);  // ✅ Smarter deps!
 
     const [errors, setErrors] = useState({});
     const [quizErrors, setQuizErrors] = useState({});
@@ -129,142 +165,105 @@ function CreateTest() {
         localStorage.setItem("quizData", JSON.stringify(quiz));
     }, [quiz]);
 
-    useEffect(() => {
-        localStorage.setItem("questionsData", JSON.stringify(questions));
-    }, [questions]);
+
 
     // If editing: prefill from location.state.task OR fetch by id
     useEffect(() => {
-        const incoming = location?.state?.task;
-        if (incoming) {
-            // Map incoming structure into our form shape
-            setQuiz((prev) => ({
-                ...prev,
-                title: incoming.title ?? prev.title,
-                duration: incoming.duration ? String(incoming.duration) : prev.duration,
-                targetAudience: incoming.targetAudience ?? prev.targetAudience,
-                author: incoming.author ?? prev.author,
-                passMarks:
-                    incoming.passMarks !== undefined && incoming.passMarks !== null
-                        ? String(incoming.passMarks)
-                        : prev.passMarks,
-                totalMarks:
-                    incoming.totalMarks !== undefined && incoming.totalMarks !== null
-                        ? String(incoming.totalMarks)
-                        : prev.totalMarks,
-                institute: incoming.institute ?? prev.institute,
-                startDate: incoming.startDate ?? prev.startDate,
-                startTime: incoming.startTime ?? prev.startTime,
-            }));
-
-            // prefer startTimestamp
-            if (incoming.startTimestamp) {
-                setStartTimestampInput(isoToLocalInputValue(incoming.startTimestamp));
-            } else if (incoming.startDate && incoming.startTime) {
-                // optional: combine date + time into datetime-local if both present
-                try {
-                    const combined = new Date(`${incoming.startDate}T${incoming.startTime}`);
-                    if (!isNaN(combined.getTime())) {
-                        setStartTimestampInput(isoToLocalInputValue(combined.toISOString()));
-                    }
-                } catch {
-                    // ignore
-                }
-            }
-
-            // questions: try to copy incoming.questions if present
-            if (Array.isArray(incoming.questions) && incoming.questions.length) {
-                // ensure each question has options array and correctIdx
-                const mapped = incoming.questions.map((q) => ({
-                    questionText: q.questionText ?? q.text ?? "",
-                    options: Array.isArray(q.options)
-                        ? q.options
-                        : [
-                            q.option1 ?? "",
-                            q.option2 ?? "",
-                            q.option3 ?? "",
-                            q.option4 ?? "",
-                        ].filter(() => true), // keep blanks as-is
-                    correctIdx:
-                        typeof q.correctIdx === "number"
-                            ? q.correctIdx
-                            : q.correctOptionIndex ?? 0,
-                }));
-                setQuestions(mapped.length ? mapped : [{ questionText: "", options: ["", ""], correctIdx: 0 }]);
-            }
-            return;
-        }
-
-        // If no incoming state but :id present, fetch from API
         let cancelled = false;
-        if (id) {
-            (async () => {
-                try {
-                    const res = await fetch(`http://localhost:5000/api/tests/${id}`, { credentials: "include" });
-                    if (!res.ok) {
-                        const txt = await res.text().catch(() => "");
-                        throw new Error(`${res.status} ${txt}`);
-                    }
-                    const data = await res.json();
-                    if (cancelled) return;
-                    const t = data?.data || data || {};
-                    setQuiz((prev) => ({
-                        ...prev,
-                        title: t.title ?? prev.title,
-                        duration: t.duration ? String(t.duration) : prev.duration,
-                        targetAudience: t.targetAudience ?? prev.targetAudience,
-                        author: t.author ?? prev.author,
-                        passMarks:
-                            t.passMarks !== undefined && t.passMarks !== null ? String(t.passMarks) : prev.passMarks,
-                        totalMarks:
-                            t.totalMarks !== undefined && t.totalMarks !== null ? String(t.totalMarks) : prev.totalMarks,
-                        institute: t.institute ?? prev.institute,
-                        startDate: t.startDate ?? prev.startDate,
-                        startTime: t.startTime ?? prev.startTime,
-                    }));
-                    if (t.startTimestamp) {
-                        setStartTimestampInput(isoToLocalInputValue(t.startTimestamp));
-                    } else if (t.startDate && t.startTime) {
-                        try {
-                            const combined = new Date(`${t.startDate}T${t.startTime}`);
-                            if (!isNaN(combined.getTime())) {
-                                setStartTimestampInput(isoToLocalInputValue(combined.toISOString()));
-                            }
-                        } catch { }
-                    }
-                    if (Array.isArray(t.questions) && t.questions.length) {
-                        const mapped = t.questions.map((q) => ({
-                            questionText: q.questionText ?? q.text ?? "",
-                            options: Array.isArray(q.options)
-                                ? q.options
-                                : [
-                                    q.option1 ?? "",
-                                    q.option2 ?? "",
-                                    q.option3 ?? "",
-                                    q.option4 ?? "",
-                                ],
-                            correctIdx:
-                                typeof q.correctIdx === "number"
-                                    ? q.correctIdx
-                                    : q.correctOptionIndex ?? 0,
-                        }));
-                        setQuestions(mapped.length ? mapped : [{ questionText: "", options: ["", ""], correctIdx: 0 }]);
-                    }
-                } catch (err) {
-                    console.error("Failed to load test for edit:", err);
+
+        const loadEditData = async () => {
+            try {
+                // 1️⃣ Dashboard edit (location.state.task)
+                const incoming = location?.state?.task;
+                if (incoming) {
+                    console.log("🟢 Loading dashboard edit:", incoming);
+
+                    setQuiz({
+                        title: incoming.title || "",
+                        duration: incoming.duration?.toString() || "",
+                        startDate: incoming.startDate || "",
+                        startTime: incoming.startTime || "",
+                        targetAudience: incoming.targetAudience || "",
+                        author: incoming.author || "",
+                        passMarks: incoming.passMarks?.toString() || "",
+                        totalMarks: incoming.totalMarks?.toString() || "",
+                        institute: incoming.institute || ""
+                    });
+
+                    // Load sections OR fallback to questions
+                    const sectionsData = incoming.sections || [{
+                        name: "General",
+                        marks: Number(incoming.totalMarks) || 10,
+                        questions: incoming.questions || []
+                    }];
+
+                    setSections(sectionsData.map(sec => ({
+                        name: sec.name || "General",
+                        marks: Number(sec.marks) || 10,
+                        questions: (sec.questions || []).map(q => ({
+                            questionText: q.questionText || q.text || "",
+                            options: Array.isArray(q.options) ? q.options.map(o => o.text || o) : [],
+                            correctIdx: Number(q.correctIdx || q.correctOptionIndex || 0)
+                        }))
+                    })));
+
+                    setCurrentSectionIndex(0);
+                    return;
                 }
-            })();
-        }
+
+                // 2️⃣ URL edit (id param)
+                if (id) {
+                    console.log("🟢 Fetching API:", id);
+                    const res = await fetch(`http://localhost:5000/api/tests/${id}`, {
+                        credentials: "include"
+                    });
+
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+
+                    if (cancelled) return;
+
+                    const t = data.data || data;
+                    console.log("🟢 API data:", t);
+
+                    setQuiz({
+                        title: t.title || "",
+                        duration: t.duration?.toString() || "",
+                        startDate: t.startDate || "",
+                        startTime: t.startTime || "",
+                        targetAudience: t.targetAudience || "",
+                        author: t.author || "",
+                        passMarks: t.passMarks?.toString() || "",
+                        totalMarks: t.totalMarks?.toString() || "",
+                        institute: t.institute || ""
+                    });
+
+                    if (t.sections?.length) {
+                        setSections(t.sections.map(sec => ({
+                            name: sec.name || "General",
+                            marks: Number(sec.marks) || 10,
+                            questions: sec.questions.map(q => ({
+                                questionText: q.questionText || q.text || "",
+                                options: Array.isArray(q.options) ? q.options.map(o => o.text || o) : [],
+                                correctIdx: Number(q.correctIdx || q.correctOptionIndex || 0)
+                            }))
+                        })));
+                    }
+
+                    setCurrentSectionIndex(0);
+                }
+            } catch (err) {
+                console.error("❌ Edit failed:", err);
+            }
+        };
+
+        if (isEditMode) loadEditData();
         return () => { cancelled = true; };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [location, id]);
+    }, [id, location?.state?.task, isEditMode]);
 
-    // --- SYNC: when separate date+time inputs changed, set datetime-local (if user hasn't explicitly set it) ---
+
     useEffect(() => {
-        // Only sync into datetime-local when user hasn't manually typed a datetime-local.
-        // This avoids overwriting a deliberate datetime-local choice.
-        if (startTimestampInput) return; // user already set datetime-local - don't override
-
+        if (startTimestampInput || quiz.startDate || quiz.startTime) return;  
         const d = quiz.startDate;
         const t = quiz.startTime;
         if (!d || !t) return;
@@ -283,7 +282,7 @@ function CreateTest() {
 
     // --- SYNC: when datetime-local changed, update the separate date/time inputs so both are visible ---
     useEffect(() => {
-        if (!startTimestampInput) return;
+        if (startTimestampInput || quiz.startDate || quiz.startTime) return;
         try {
             // startTimestampInput is like "2025-11-08T22:12"
             const d = new Date(startTimestampInput);
@@ -315,7 +314,6 @@ function CreateTest() {
             "duration",
             // startDate & startTime are optional if startTimestamp provided
             "targetAudience",
-            "totalMarks",
         ];
 
         requiredFields.forEach((field) => {
@@ -356,7 +354,7 @@ function CreateTest() {
     const validateQuestions = () => {
         const newErrors = {};
         let hasValidQuestion = false;
-        questions.forEach((q, idx) => {
+        currentQuestions.forEach((q, idx) => {
             const qErrors = validateQuestion(q);
             if (qErrors.questionText || qErrors.minOptions || qErrors.options.some((e) => e)) {
                 newErrors[idx] = qErrors;
@@ -368,6 +366,14 @@ function CreateTest() {
     };
 
     const handleQuizChange = (field, val) => {
+        // 🔥 FIX: Prevent time input from resetting to current time
+        if (field === "startTime" && quiz.startTime && val !== quiz.startTime) {
+            setQuiz((prev) => ({ ...prev, [field]: val }));
+            setQuizErrors((prev) => ({ ...prev, [field]: !val.trim() }));
+            setValidationMessage("");
+            return;
+        }
+
         // date cannot be in past -- immediate feedback
         if (field === "startDate") {
             if (val && val < todayStr()) {
@@ -412,80 +418,104 @@ function CreateTest() {
     };
 
     const handleQChange = (idx, val) => {
-        const updated = [...questions];
+        const updated = [...currentQuestions];
         updated[idx].questionText = val;
-        setQuestions(updated);
+        setCurrentQuestions(updated);
         setErrors((prev) => ({ ...prev, [idx]: validateQuestion(updated[idx]) }));
         setValidationMessage("");
     };
 
     const handleOChange = (qi, oi, val) => {
-        const updated = [...questions];
+        const updated = [...currentQuestions];
         updated[qi].options[oi] = val;
-        setQuestions(updated);
+        setCurrentQuestions(updated);
         setErrors((prev) => ({ ...prev, [qi]: validateQuestion(updated[qi]) }));
         setValidationMessage("");
     };
 
     const addOption = (qi) => {
-        if (questions[qi].options.length < 4) {
-            const updated = [...questions];
+        if (currentQuestions[qi].options.length < 4) {
+            const updated = [...currentQuestions];
             updated[qi].options.push("");
-            setQuestions(updated);
+            setCurrentQuestions(updated);
             setErrors((prev) => ({ ...prev, [qi]: validateQuestion(updated[qi]) }));
         }
     };
 
+    // ✅ FIXED - Syncs to SECTIONS too!
     const setCorrect = (qi, oi) => {
-        const updated = [...questions];
-        updated[qi].correctIdx = oi;
-        setQuestions(updated);
+        // Update current questions
+        const updatedQuestions = [...currentQuestions];
+        updatedQuestions[qi].correctIdx = oi;
+        setCurrentQuestions(updatedQuestions);
+
+        // ✅ SYNC TO SECTIONS IMMEDIATELY
+        setSections(prevSections => prevSections.map((sec, secIdx) =>
+            secIdx === currentSectionIndex
+                ? {
+                    ...sec,
+                    questions: updatedQuestions.map(q => ({
+                        ...q,
+                        correctIdx: q.correctIdx  // ✅ Preserve correctIdx!
+                    }))
+                }
+                : sec
+        ));
+
+        console.log(`✅ Set Q${qi + 1} correct answer to option ${oi}`);  // DEBUG
     };
+
 
     const addQuestion = () => {
-        setQuestions((prev) => [
-            ...prev,
-            { questionText: "", options: ["", ""], correctIdx: 0 },
-        ]);
-        setErrors((prev) => ({
-            ...prev,
-            [questions.length]: validateQuestion({
-                questionText: "",
-                options: ["", ""],
-                correctIdx: 0,
-            }),
-        }));
+        const newQuestion = { questionText: "", options: ["", ""], correctIdx: 0 };
+        setSections(sections.map((sec, i) =>
+            i === currentSectionIndex
+                ? { ...sec, questions: [...sec.questions, newQuestion] }
+                : sec
+        ));
+        setCurrentQuestions(prev => [...prev, newQuestion]);
     };
 
+
+
+    // ✅ CORRECT
     const deleteQuestion = (idx) => {
-        if (questions.length === 1) return; // prevent deleting last question silently
-        const updated = questions.filter((_, i) => i !== idx);
-        setQuestions(updated);
+        if (currentQuestions.length === 1) return;
+
+        // ✅ SYNC BACK TO SECTIONS
+        setSections(sections.map((sec, i) =>
+            i === currentSectionIndex
+                ? { ...sec, questions: sec.questions.filter((_, qIdx) => qIdx !== idx) }
+                : sec
+        ));
+
+        setCurrentQuestions(prev => prev.filter((_, i) => i !== idx));
         setErrors((prev) => {
             const { [idx]: _, ...rest } = prev;
             return rest;
         });
     };
 
-    const numPages = Math.ceil(questions.length / QUESTIONS_PER_PAGE);
-    const pagedQuestions = questions.slice(
+
+    // ✅ CORRECT
+    const numPages = Math.ceil(currentQuestions.length / QUESTIONS_PER_PAGE);
+    const pagedQuestions = currentQuestions.slice(
         currentPage * QUESTIONS_PER_PAGE,
         (currentPage + 1) * QUESTIONS_PER_PAGE
     );
 
     const clearAll = () => {
-        setQuestions([{ questionText: "", options: ["", ""], correctIdx: 0 }]);
+        // 🔥 RESET EVERYTHING
+        setSections([{ name: "General", marks: 10, questions: [] }]);
+        setCurrentSectionIndex(0);
+        setCurrentQuestions([{ questionText: "", options: ["", ""], correctIdx: 0 }]);
         setQuiz({
             title: "",
             duration: "",
             startDate: "",
             startTime: "",
             targetAudience: "",
-            author:
-                localStorage.getItem("author") ||
-                localStorage.getItem("name") ||
-                localStorage.getItem("email") ||
-                "",
+            author: localStorage.getItem("author") || localStorage.getItem("name") || localStorage.getItem("email") || "",
             passMarks: "",
             totalMarks: "",
             institute: "",
@@ -495,90 +525,11 @@ function CreateTest() {
         setErrors({});
         setQuizErrors({});
         setValidationMessage("");
+        setImportStatus("");
         localStorage.removeItem("quizData");
         localStorage.removeItem("questionsData");
     };
 
-    // Import from Excel
-    const handleImport = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-            const data = evt.target.result;
-            const workbook = XLSX.read(data, { type: "binary" });
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const raw = XLSX.utils.sheet_to_json(sheet);
-
-            const imported = raw
-                .map((row) => {
-                    const options = [
-                        String(row.Option1 ?? ""),
-                        String(row.Option2 ?? ""),
-                        String(row.Option3 ?? ""),
-                        String(row.Option4 ?? ""),
-                    ].filter((opt) => opt !== "");
-
-                    let correctIdx = 0;
-                    if (typeof row.CorrectAnswer === "string") {
-                        const optionMap = { A: 0, B: 1, C: 2, D: 3 };
-                        const answerKey = row.CorrectAnswer.toUpperCase().trim();
-                        correctIdx = optionMap[answerKey] ?? 0;
-                        if (correctIdx >= options.length) correctIdx = 0;
-                    }
-
-                    return {
-                        questionText: String(row.Question || ""),
-                        options: options.length ? options : ["", ""],
-                        correctIdx: correctIdx,
-                    };
-                })
-                .filter((q) => q.questionText.trim() && q.options.length >= 2);
-
-            if (imported.length === 0) {
-                setImportStatus("No valid questions found in the file.");
-                setTimeout(() => setImportStatus(""), 2500);
-                return;
-            }
-
-            setImportedQuestions(imported);
-            setShowImportModal(true);
-        };
-        reader.readAsBinaryString(file);
-        e.target.value = null;
-    };
-
-    const handleImportYes = async () => {
-        await saveQuestionsToDB(importedQuestions); // Replace with real API call if needed
-        setQuestions((prev) => [...prev, ...importedQuestions]);
-        setImportStatus(`${importedQuestions.length} questions imported & saved!`);
-        setShowImportModal(false);
-        setImportedQuestions([]);
-        setErrors((prev) => {
-            const newErrors = { ...prev };
-            importedQuestions.forEach((q, i) => {
-                newErrors[questions.length + i] = validateQuestion(q);
-            });
-            return newErrors;
-        });
-        setTimeout(() => setImportStatus(""), 2500);
-    };
-
-    const handleImportNo = () => {
-        setQuestions((prev) => [...prev, ...importedQuestions]);
-        setImportStatus(`${importedQuestions.length} questions imported (not saved to DB)!`);
-        setShowImportModal(false);
-        setImportedQuestions([]);
-        setErrors((prev) => {
-            const newErrors = { ...prev };
-            importedQuestions.forEach((q, i) => {
-                newErrors[questions.length + i] = validateQuestion(q);
-            });
-            return newErrors;
-        });
-        setTimeout(() => setImportStatus(""), 2500);
-    };
 
     const [isSaving, setIsSaving] = useState(false);
     const [facultyEmail, setFacultyEmail] = useState("");
@@ -592,8 +543,15 @@ function CreateTest() {
             "";
         setQuiz((prev) => ({ ...prev, author: authorFromStorage }));
     }, []);
+    // 🔥 PERSIST SECTIONS TO LOCALSTORAGE
+    useEffect(() => {
+        if (!isEditMode) {  // Don't persist in edit mode
+            localStorage.setItem("sectionsData", JSON.stringify(sections));
+            localStorage.setItem("currentSectionIndex", currentSectionIndex.toString());
+        }
+    }, [sections, currentSectionIndex, isEditMode]);
 
-    // Create or Save (update)
+
     const handleCreateOrSave = async () => {
         const quizValidationErrors = validateQuiz();
         const { errors: questionErrors, hasValidQuestion } = validateQuestions();
@@ -615,53 +573,68 @@ function CreateTest() {
             return;
         }
 
-        // Build payload
+        // 🔥 CLEAN SIMPLE PAYLOAD - Backend generates all IDs!
         const payload = {
             title: quiz.title.trim(),
             duration: Number(quiz.duration),
-            // prefer startTimestamp if set
             startTimestamp: startTimestampInput ? localInputValueToIso(startTimestampInput) : undefined,
             startDate: !startTimestampInput ? quiz.startDate : undefined,
             startTime: !startTimestampInput ? quiz.startTime : undefined,
             targetAudience: quiz.targetAudience.trim(),
-            author:
-                quiz.author?.trim() ||
-                localStorage.getItem("author") ||
-                localStorage.getItem("name") ||
-                localStorage.getItem("email") ||
-                "",
+            author: quiz.author?.trim() || localStorage.getItem("author") || localStorage.getItem("name") || localStorage.getItem("email") || "",
             passMarks: quiz.passMarks ? Number(quiz.passMarks) : undefined,
-            totalMarks: Number(quiz.totalMarks),
-            institute: quiz.institute?.trim() || "",
-            questions,
+            totalMarks: sections.reduce((sum, sec) => sum + Number(sec.marks || 10), 0) || 100,
+            institute: (quiz.institute || localStorage.getItem("institute") || institute || "Poornima University").trim(),
             facultyEmail,
+
+            // 🔥 PERFECT FORMAT - Backend LOVES this!
+            sections: sections.map(sec => ({
+                name: sec.name || "General",
+                marks: Number(sec.marks) || 10,
+                questions: sec.questions.map(q => ({
+                    questionText: String(q.questionText || ""),
+                    options: (Array.isArray(q.options) ? q.options.slice(0, 4) : ["", "", "", ""]).map(opt => ({
+                        text: String(opt || "")
+                    }))
+                }))
+            }))
         };
 
+        // Clean undefined fields
         Object.keys(payload).forEach((k) => {
             if (payload[k] === undefined) delete payload[k];
         });
 
+        console.log("🚀 FULL PAYLOAD:", JSON.stringify(payload, null, 2));
+
         setIsSaving(true);
         try {
             let res;
-            if (id || location?.state?.task?._id) {
-                // update flow: prefer URL id then task._id
-                const targetId = id || location?.state?.task?._id;
-                res = await fetch(`http://localhost:5000/api/tests/${targetId}`, {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json" },
-                    credentials: "include",
-                    body: JSON.stringify(payload),
-                });
-            } else {
-                // create
-                res = await fetch("http://localhost:5000/api/tests", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    credentials: "include",
-                    body: JSON.stringify(payload),
-                });
+
+            // 🔥 YOUR GENIUS IDEA: Delete old + create fresh!
+            if (isEditMode) {
+                const targetId = urlId || incomingTask?._id;
+                console.log("🗑️ DELETING OLD TEST:", targetId);
+
+                // Delete old test first (ignore errors)
+                try {
+                    await fetch(`http://localhost:5000/api/tests/${targetId}`, {
+                        method: "DELETE",
+                        credentials: "include"
+                    });
+                } catch (deleteErr) {
+                    console.log("ℹ️ Delete ignored (might not exist):", deleteErr.message);
+                }
             }
+
+            // Always create FRESH new test ✅
+            console.log("🆕 CREATING FRESH TEST");
+            res = await fetch("http://localhost:5000/api/tests", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify(payload),
+            });
 
             const text = await res.text().catch(() => "");
             let data;
@@ -676,12 +649,13 @@ function CreateTest() {
                 throw new Error(data?.message || `Server responded with ${res.status}`);
             }
 
-            alert(id || location?.state?.task ? "Test saved successfully!" : "Test created successfully!");
-            // After save remove local draft so stale data won't rehydrate later
-            localStorage.removeItem("quizData");
-            localStorage.removeItem("questionsData");
+            alert(isEditMode ? "Test updated successfully!" : "Test created successfully!");
 
-            // After save navigate back to dashboard (or wherever you want)
+            // Clear local draft
+            localStorage.removeItem("quizData");
+            localStorage.removeItem("sectionsData");
+            localStorage.removeItem("currentSectionIndex");
+
             navigate("/", { replace: true });
         } catch (err) {
             console.error("handleCreateOrSave error:", err);
@@ -691,7 +665,9 @@ function CreateTest() {
         }
     };
 
-    const isEditing = Boolean(id || location?.state?.task);
+
+    const isEditing = Boolean(urlId || incomingTask);
+    const [showDBSelector, setShowDBSelector] = useState(false);
 
     return (
         <div className="relative min-h-screen bg-gradient-to-br from-gray-50 to-indigo-100 py-8">
@@ -727,68 +703,259 @@ function CreateTest() {
                 )}
 
                 {/* Quiz Info Inputs */}
-                <section className="mb-10 p-6 bg-white rounded-2xl shadow-xl border border-gray-200">
-                    <h2 className="text-2xl font-bold text-indigo-900 border-b border-indigo-200 pb-3 mb-6">
-                        Information
+                <section className="mb-12 p-8 bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl 
+  border border-white/50 hover:shadow-3xl transition-all duration-300">
+                    <h2 className="text-3xl font-black bg-gradient-to-r from-indigo-900 to-purple-900 
+    bg-clip-text text-transparent mb-8 pb-4 border-b-4 border-indigo-200">
+                        📋 Test Information
                     </h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 ">
-                        {[
-                            { id: "title", placeholder: "Title", type: "text" },
-                            { id: "duration", placeholder: "Duration (minutes)", type: "number" },
-                            { id: "startDate", placeholder: "Start Date", type: "date" },
-                            { id: "startTime", placeholder: "Start Time", type: "time" },
-                            { id: "targetAudience", placeholder: "Target Audience (comma separated)", type: "text" },
-                            { id: "passMarks", placeholder: "Pass Marks (optional)", type: "number" },
-                            { id: "totalMarks", placeholder: "Total Marks", type: "number" },
-                        ].map((field) => (
-                            <div key={field.id} className="flex flex-col justify-between space-y-1">
-                                <input
-                                    list={field.id === "targetAudience" ? "audience-list" : undefined}
-                                    id={field.id}
-                                    type={field.type}
-                                    placeholder={field.placeholder}
-                                    value={quiz[field.id] ?? ""}
-                                    onChange={(e) => handleQuizChange(field.id, e.target.value)}
-                                    className={`p-3 rounded-lg border ${quizErrors[field.id] ? "border-red-400" : "border-gray-300"
-                                        } bg-gray-50 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition w-full`}
-                                />
 
-                                {field.id === "startDate" && quizErrors.startDate && (
-                                    <div className="text-sm text-red-500 mt-1">
-                                        {typeof quizErrors.startDate === "string" ? quizErrors.startDate : "Please choose today or a future date."}
+                    {/* Enhanced responsive grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+                        {[
+                            { id: "title", placeholder: "Test Title", icon: "📝", className: "col-span-2 md:col-span-1" },
+                            { id: "duration", placeholder: "Duration (min)", icon: "⏱️", className: "" },
+                            { id: "startDate", placeholder: "Start Date", icon: "📅", className: "", type: "date" },
+                            { id: "startTime", placeholder: "Start Time", icon: "🕐", className: "", type: "time" },
+                            { id: "targetAudience", placeholder: "Target Audience", icon: "👥", className: "col-span-2 md:col-span-1", type: "select" },
+                            { id: "passMarks", placeholder: "Pass Marks", icon: "✅", className: "" },
+                        ].map((field) => (
+                            <div key={field.id} className={`${field.className} group`}>
+                                <label className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                                    {field.icon} {field.placeholder}
+                                </label>
+
+                                {/* ✅ CUSTOM DROPDOWN for targetAudience */}
+                                {field.id === "targetAudience" ? (
+                                    <div className="relative group">
+                                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl opacity-60 z-10">
+                                            {field.icon}
+                                        </div>
+
+                                        {/* ✅ TYPEAHEAD INPUT */}
+                                        <input
+                                            id={field.id}
+                                            type="text"
+                                            placeholder="Type 'BCA' or 'Batch' to search..."
+                                            value={quiz[field.id] ?? ""}
+                                            onChange={(e) => handleQuizChange(field.id, e.target.value)}  // ✅ Your existing handler!
+                                            className={`w-full p-4 pl-12 pr-4 rounded-2xl border-2 bg-gradient-to-r from-gray-50/50 to-blue-50/50 
+        text-gray-900 font-medium text-lg backdrop-blur-sm transition-all duration-300
+        focus:outline-none focus:ring-4 focus:ring-indigo-500/30 focus:border-indigo-400 
+        hover:border-indigo-300 hover:shadow-lg group-hover:scale-[1.02] 
+        ${quizErrors[field.id] ? 'border-red-400 bg-red-50/50 focus:ring-red-500/30' : 'border-gray-200'}`}
+                                        />
+
+                                        {/* ✅ FIXED DROPDOWN - Replace the entire dropdown div */}
+                                        {audienceSuggestions.length > 0 && quiz.targetAudience && (
+                                            <div className="fixed top-28 left-1/2 -translate-x-1/2 mt-2 w-96 bg-white/98 backdrop-blur-3xl 
+    border-4 border-indigo-200/80 rounded-3xl shadow-2xl max-h-80 overflow-auto z-[999999] mx-4 animate-in fade-in">
+
+                                                {audienceSuggestions.slice(0, 10).map((audience) => (
+                                                    <div
+                                                        key={audience}
+                                                        className="px-6 py-4 hover:bg-indigo-100 cursor-pointer border-b border-gray-100 
+          last:border-b-0 hover:text-indigo-800 transition-all font-semibold text-lg hover:scale-[1.02]"
+                                                        onClick={() => {
+                                                            handleQuizChange("targetAudience", audience);
+                                                            setAudienceSuggestions([]);
+                                                        }}
+                                                    >
+                                                        {audience}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                    </div>
+                                ) : (
+ 
+                                    // ✅ Original input for other fields
+                                    <div className="relative">
+                                        <input
+                                            list={field.id === "targetAudience" ? "audience-list" : undefined}
+                                            id={field.id}
+                                            type={field.type || "text"}
+                                            placeholder={`Enter ${field.placeholder.toLowerCase()}...`}
+                                            value={quiz[field.id] ?? ""}
+                                            onChange={(e) => handleQuizChange(field.id, e.target.value)}
+                                            className={`w-full p-4 pl-12 pr-4 rounded-2xl border-2 bg-gradient-to-r from-gray-50/50 to-blue-50/50 
+            text-gray-900 placeholder-gray-500 font-medium text-lg backdrop-blur-sm transition-all duration-300
+            focus:outline-none focus:ring-4 focus:ring-indigo-500/30 focus:border-indigo-400 
+            hover:border-indigo-300 hover:shadow-lg group-hover:scale-[1.02] 
+            ${quizErrors[field.id] ? 'border-red-400 bg-red-50/50 focus:ring-red-500/30' : 'border-gray-200'}`}
+                                        />
+                                        {field.icon && (
+                                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl opacity-60">
+                                                {field.icon}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 
-                                {field.id === "passMarks" && quizErrors.passMarks && (
-                                    <div className="text-sm text-red-500 mt-1">{quizErrors.passMarks}</div>
+                                {quizErrors[field.id] && (
+                                    <p className="text-red-500 text-sm mt-2 font-medium animate-pulse">
+                                        {typeof quizErrors[field.id] === "string" ? quizErrors[field.id] : "This field is required"}
+                                    </p>
                                 )}
                             </div>
                         ))}
                     </div>
-
-                    <datalist id="audience-list">
-                        {audienceSuggestions.map((s) => (
-                            <option key={s} value={s} />
-                        ))}
-                    </datalist>
                 </section>
+
+                <section className="mb-12 p-8 bg-gradient-to-br from-indigo-50/80 via-purple-50/80 to-pink-50/80 
+  backdrop-blur-xl rounded-3xl shadow-2xl border border-indigo-200/50 hover:shadow-3xl transition-all">
+                    <h2 className="text-3xl font-black bg-gradient-to-r from-indigo-900 via-purple-900 to-pink-900 
+    bg-clip-text text-transparent mb-8 flex items-center gap-3">
+                        📚 Test Sections
+                    </h2>
+
+                    {/* Enhanced tabs */}
+                    <div className="flex flex-wrap gap-3 mb-8">
+                        {sections.map((sec, idx) => (
+                            <button
+                                key={`section-${idx}`}
+                                onClick={() => setCurrentSectionIndex(idx)}
+                                className={`group relative px-6 py-4 rounded-2xl font-bold text-lg shadow-lg transition-all duration-300
+          backdrop-blur-sm border-2 ${idx === currentSectionIndex
+                                        ? 'bg-gradient-to-r from-indigo-500 to-purple-600 border-indigo-400 text-white shadow-2xl scale-105'
+                                        : 'bg-white/70 border-gray-200 hover:border-indigo-300 hover:shadow-xl hover:scale-102 hover:bg-indigo-50 text-gray-800'
+                                    }`}
+                            >
+                                <span>📂 {sec.name}</span>
+                                <span className="ml-3 font-mono text-sm opacity-80">({sec.marks}m)</span>
+
+                                {idx !== 0 && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            // ✅ FIXED delete button
+                                            if (sections.length > 1) {
+                                                if (idx === currentSectionIndex) {
+                                                    setCurrentSectionIndex(idx > 0 ? idx - 1 : 0);  // Move to PREV section first
+                                                }
+                                                setSections(sections.filter((_, i) => i !== idx));
+                                            }
+
+                                        }}
+                                        className="absolute -top-2 -right-2 w-8 h-8 bg-red-500 text-white rounded-2xl font-bold 
+              shadow-lg hover:bg-red-600 scale-0 group-hover:scale-100 transition-all duration-200 flex items-center justify-center"
+                                        title="Delete section"
+                                    >
+                                        ×
+                                    </button>
+                                )}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Section editor */}
+                    <div className="flex gap-4 p-6 bg-white/60 rounded-2xl border-2 border-dashed border-indigo-300/50 
+    backdrop-blur-sm hover:border-indigo-400 transition-all">
+                        <input
+                            type="text"
+                            placeholder="Section name..."
+                            value={currentSectionIndex === 0 && !currentSection.name ? "General" : currentSection.name}
+                            onChange={(e) => {
+                                const newName = e.target.value.trim() || "";
+                                setSections(sections.map((s, i) =>
+                                    i === currentSectionIndex
+                                        ? { ...s, name: newName || (i === 0 ? "General" : "") }
+                                        : s
+                                ));
+                            }}
+                            className="flex-1 p-4 rounded-xl border-2 border-gray-200 focus:ring-4 focus:ring-indigo-500/30 
+        focus:border-indigo-400 bg-white/50 backdrop-blur-sm font-semibold text-lg"
+                        // ✅ REMOVED disabled - ALL sections editable!
+                        />
+
+                        <input
+                            type="number"
+                            placeholder="Marks"
+                            value={currentSection.marks}
+                            onChange={(e) => setSections(sections.map((s, i) => i === currentSectionIndex ? { ...s, marks: Number(e.target.value) || 10 } : s))}
+                            min="1" max="100"
+                            className="w-28 p-4 rounded-xl border-2 border-gray-200 focus:ring-4 focus:ring-indigo-500/30 
+        focus:border-indigo-400 bg-white/50 font-bold text-lg"
+                        />
+                        <button
+                            onClick={() => {
+                                const newSection = { name: "New Section", marks: 10, questions: [] };
+                                setSections([...sections, newSection]);
+                                setCurrentSectionIndex(sections.length);
+                            }}
+                            className="px-8 py-4 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-black 
+        rounded-2xl shadow-xl hover:from-emerald-600 hover:to-teal-700 hover:shadow-2xl 
+        hover:scale-105 transition-all duration-300 whitespace-nowrap"
+                        >
+                            ➕ New Section
+                        </button>
+                    </div>
+                </section>
+
 
                 {/* Actions Bar */}
                 <div className="flex items-center justify-between p-4 bg-white rounded-2xl shadow-md mb-6 border border-gray-200">
                     <div className="flex gap-4">
-                        <button
-                            className="flex items-center gap-2 px-5 py-2 bg-indigo-500 text-white rounded-lg font-semibold hover:bg-indigo-600 transition"
-                            onClick={() => fileRef.current.click()}
+                        {showDBSelector && (
+                            <DatabaseQuestionSelector
+                                onImportQuestions={(selectedQuestions) => {
+                                    const normalizedQuestions = selectedQuestions.map(q => ({
+                                        questionText: q.questionText || q.text || "",
+                                        options: Array.isArray(q.options)
+                                            ? q.options.map(opt => opt.text || opt || "")
+                                            : [q.option1 || "", q.option2 || "", q.option3 || "", q.option4 || ""],
+                                        correctIdx: q.correctIdx || q.correctOptionIndex || 0
+                                    }));
+
+                                    setSections(sections.map((sec, i) =>
+                                        i === currentSectionIndex
+                                            ? { ...sec, questions: [...sec.questions, ...normalizedQuestions] }
+                                            : sec
+                                    ));
+
+                                    setCurrentQuestions(prev => [...prev, ...normalizedQuestions]);
+                                    setShowDBSelector(false);
+                                    setImportStatus(`✅ Imported ${selectedQuestions.length} questions from database!`);
+                                    setTimeout(() => setImportStatus(""), 4000);
+                                }}
+                            />
+
+                        )}
+                        {/* <button
+                            onClick={() => setShowDBSelector(true)}
+                            className="flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-2xl shadow-xl hover:from-orange-600 hover:to-red-600 hover:shadow-2xl transform hover:scale-105 transition-all duration-300 text-lg"
                         >
-                            <FiUpload /> Import Questions
-                        </button>
-                        <input
-                            ref={fileRef}
-                            type="file"
-                            accept=".xlsx,.xls"
-                            onChange={handleImport}
-                            className="hidden"
+                            🗄️ Select from Database
+                        </button> */}
+                        <FileUploader
+                            onQuestionsImported={(importedQuestions) => {
+                                // ✅ ADD TO CURRENT SECTION
+                                const normalizedQuestions = importedQuestions.map(q => ({
+                                    questionText: q.questionText || q.text || "",
+                                    options: Array.isArray(q.options)
+                                        ? q.options.map(opt => opt.text || opt || "")
+                                        : [q.option1 || "", q.option2 || "", q.option3 || "", q.option4 || ""],
+                                    correctIdx: q.correctIdx || q.correctOptionIndex || 0
+                                }));
+
+                                setSections(sections.map((sec, i) =>
+                                    i === currentSectionIndex
+                                        ? { ...sec, questions: [...sec.questions, ...normalizedQuestions] }
+                                        : sec
+                                ));
+
+                                // 🔥 FIX: TRIGGER currentQuestions sync!
+                                setCurrentQuestions(prev => [...prev, ...normalizedQuestions]);
+
+                                setImportStatus(`${importedQuestions.length} questions → ${currentSection.name}`);
+                                setShowImportModal(false);
+                            }}
                         />
+
+
+
+
                         <div className="relative group">
                             <button
                                 className="flex items-center gap-2 px-5 py-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition"
@@ -801,34 +968,11 @@ function CreateTest() {
                             </div>
                         </div>
                     </div>
-                    <span className="font-semibold text-lg text-indigo-900">Total Questions: {questions.length}</span>
+                    <span className="font-semibold text-lg text-indigo-900">
+                        
+                        Questions: {sections.reduce((sum, sec) => sum + sec.questions.length, 0)}
+                    </span>
                 </div>
-
-                {/* Import Confirmation Modal */}
-                {showImportModal && (
-                    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-60 z-50">
-                        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
-                            <h3 className="text-xl font-bold text-indigo-900 mb-4">
-                                Import {importedQuestions.length} Questions?
-                            </h3>
-                            <p className="text-gray-600 mb-6">Would you like to save these questions to the database?</p>
-                            <div className="flex gap-4 justify-end">
-                                <button
-                                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition"
-                                    onClick={handleImportYes}
-                                >
-                                    Yes
-                                </button>
-                                <button
-                                    className="px-6 py-2 bg-gray-300 text-gray-800 rounded-lg font-semibold hover:bg-gray-400 transition"
-                                    onClick={handleImportNo}
-                                >
-                                    No
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
 
                 {!!importStatus && (
                     <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-lg">
@@ -837,67 +981,86 @@ function CreateTest() {
                 )}
 
                 {/* Questions List */}
-                {pagedQuestions.map((q, idx) => {
-                    const globalIdx = currentPage * QUESTIONS_PER_PAGE + idx;
-                    return (
-                        <div
-                            key={globalIdx}
-                            className="bg-white border border-gray-200 shadow-md rounded-2xl p-6 mb-6 relative"
+                {currentQuestions.map((q, idx) => (
+                    <div key={`q-${idx}`} className="group relative bg-white/80 backdrop-blur-xl border border-gray-200/50 
+    shadow-xl hover:shadow-2xl rounded-3xl p-8 mb-8 transition-all duration-300 hover:-translate-y-2 
+    hover:border-indigo-300/50 overflow-hidden">
+
+                        {/* Enhanced delete button */}
+                        <button
+                            className="absolute -top-4 right-4 bg-gradient-to-r from-red-500 to-rose-600 text-white 
+        w-12 h-12 rounded-3xl shadow-2xl font-bold text-xl hover:from-red-600 hover:to-rose-700 
+        hover:scale-110 hover:shadow-3xl transition-all duration-200 flex items-center justify-center z-10"
+                            onClick={() => deleteQuestion(idx)}
+                            title="Delete question"
                         >
-                            <button
-                                className="absolute top-4 right-4 text-red-500 hover:text-red-700 text-2xl transition"
-                                title="Delete this question"
-                                onClick={() => deleteQuestion(globalIdx)}
-                            >
-                                &times;
-                            </button>
-                            <div className="text-lg font-semibold text-indigo-900 mb-4">Question {globalIdx + 1}</div>
-                            <textarea
-                                className={`w-full p-4 rounded-lg border ${errors[globalIdx]?.questionText ? "border-red-400" : "border-gray-300"
-                                    } bg-gray-50 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition`}
-                                rows={3}
-                                placeholder="Enter your question here..."
-                                required
-                                value={q.questionText}
-                                onChange={(e) => handleQChange(globalIdx, e.target.value)}
-                            />
+                            ×
+                        </button>
+
+                        {/* Question header */}
+                        <div className="flex items-center gap-4 mb-6 pb-6 border-b border-indigo-100">
+                            <div className="w-12 h-12 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl flex 
+        items-center justify-center text-2xl font-bold text-white shadow-lg">
+                                Q{idx + 1}
+                            </div>
+                            <h3 className="text-2xl font-black bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text">
+                                Question {idx + 1}
+                            </h3>
+                        </div>
+
+                        {/* Enhanced textarea */}
+                        <textarea
+                            className={`w-full p-6 rounded-2xl border-2 bg-gradient-to-b from-gray-50/50 to-white/50 
+        text-gray-900 placeholder-gray-500 font-semibold text-xl min-h-[120px] resize-vertical
+        backdrop-blur-sm transition-all duration-300 hover:border-indigo-300 focus:outline-none 
+        focus:ring-4 focus:ring-indigo-500/30 focus:border-indigo-400 hover:shadow-lg
+        ${errors[idx]?.questionText ? 'border-red-400 bg-red-50/50 focus:ring-red-500/30' : 'border-gray-200'}`}
+                            placeholder="Write your question here... (Make it clear and specific)"
+                            value={q.questionText}
+                            onChange={(e) => handleQChange(idx, e.target.value)}
+                        />
+
+                        {/* Options with better spacing */}
+                        <div className="mt-8 space-y-4">
                             {q.options.map((opt, oi) => (
-                                <div key={oi} className="flex items-center gap-3 mb-4">
+                                <div key={oi} className="flex items-start gap-4 p-4 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 
+          rounded-2xl border-2 border-transparent group-hover:border-indigo-200 hover:shadow-md transition-all">
                                     <input
                                         type="radio"
                                         checked={q.correctIdx === oi}
-                                        onChange={() => setCorrect(globalIdx, oi)}
-                                        className="w-5 h-5 accent-indigo-500"
-                                        name={`opt-${globalIdx}`}
+                                        onChange={() => setCorrect(idx, oi)}
+                                        className="w-6 h-6 mt-1 accent-indigo-500 shadow-md hover:scale-110 transition-all"
+                                        name={`opt-${idx}`}
                                     />
                                     <input
                                         type="text"
-                                        required
-                                        className={`flex-1 p-3 rounded-lg border ${errors[globalIdx]?.options && errors[globalIdx].options[oi]
-                                            ? "border-red-400"
-                                            : "border-gray-300"
-                                            } bg-gray-50 text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition`}
-                                        placeholder={`Option ${oi + 1}`}
+                                        className={`flex-1 p-4 rounded-xl border-2 bg-white/70 backdrop-blur-sm font-semibold text-lg 
+              placeholder-gray-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/30 focus:border-indigo-400 
+              transition-all duration-300 hover:border-indigo-300 hover:shadow-md
+              ${errors[idx]?.options?.[oi] ? 'border-red-400 bg-red-50/70 focus:ring-red-500/30' : 'border-transparent'}`}
+                                        placeholder={`Option ${oi + 1} (Make it clear and distinct)`}
                                         value={opt}
-                                        onChange={(e) => handleOChange(globalIdx, oi, e.target.value)}
+                                        onChange={(e) => handleOChange(idx, oi, e.target.value)}
                                     />
                                 </div>
                             ))}
-                            {errors[globalIdx]?.minOptions && (
-                                <div className="text-red-500 text-sm ml-8 mb-4">At least two non-empty options are required.</div>
-                            )}
-                            {q.options.length < 4 && (
-                                <button
-                                    className="ml-8 text-indigo-600 font-semibold hover:text-indigo-800 transition"
-                                    onClick={() => addOption(globalIdx)}
-                                    type="button"
-                                >
-                                    + Add Option
-                                </button>
-                            )}
                         </div>
-                    );
-                })}
+
+                        {q.options.length < 4 && (
+                            <button
+                                className="mt-6 ml-16 px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white 
+          font-bold rounded-2xl shadow-lg hover:from-indigo-600 hover:to-purple-700 hover:shadow-xl 
+          hover:scale-105 transition-all duration-300 flex items-center gap-2"
+                                onClick={() => addOption(idx)}
+                            >
+                                ➕ Add Option
+                            </button>
+                        )}
+
+
+                    </div>
+                ))}
+
 
                 {/* Pagination */}
                 {numPages > 1 && (
