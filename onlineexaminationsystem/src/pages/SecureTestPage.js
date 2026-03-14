@@ -714,7 +714,7 @@ export default function SecureTestPage() {
         return () => clearInterval(tickRef.current);
 
     }, [attempt, test, blocked, handleManualSubmit]);
-    
+
     useEffect(() => {
 
         const detectFocusLoss = () => {
