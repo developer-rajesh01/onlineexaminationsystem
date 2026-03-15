@@ -1,0 +1,16 @@
+{
+  "files": {
+    "main.css": "/onlineexaminationsystem/static/css/main.0894a826.css",
+    "main.js": "/onlineexaminationsystem/static/js/main.ff00bdad.js",
+    "static/js/453.6df24133.chunk.js": "/onlineexaminationsystem/static/js/453.6df24133.chunk.js",
+    "static/media/login.jpg": "/onlineexaminationsystem/static/media/login.8d1bcb5e571e98d8356a.jpg",
+    "index.html": "/onlineexaminationsystem/index.html",
+    "main.0894a826.css.map": "/onlineexaminationsystem/static/css/main.0894a826.css.map",
+    "main.ff00bdad.js.map": "/onlineexaminationsystem/static/js/main.ff00bdad.js.map",
+    "453.6df24133.chunk.js.map": "/onlineexaminationsystem/static/js/453.6df24133.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.0894a826.css",
+    "static/js/main.ff00bdad.js"
+  ]
+}
