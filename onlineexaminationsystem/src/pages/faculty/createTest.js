@@ -122,21 +122,17 @@ function CreateTest() {
     const currentSection = sections[currentSectionIndex];
     const [currentQuestions, setCurrentQuestions] = useState([{ questionText: "", options: ["", ""], correctIdx: 0 }]);
     useEffect(() => {
-        // 🔥 ONLY sync if currentQuestions doesn't match section!
         const sectionQuestionsFlat = currentSection.questions.map(q => ({
             questionText: q.questionText || "",
             options: Array.isArray(q.options)
                 ? q.options.map(opt => opt.text || opt || "")
-                : q.options || [""],
+                : ["", ""],
             correctIdx: q.correctIdx || 0
         }));
 
-        // ✅ ONLY update if different length OR first load
-        if (currentQuestions.length !== sectionQuestionsFlat.length || currentSectionIndex === 0) {
-            setCurrentQuestions(sectionQuestionsFlat);
-        }
-    }, [currentSectionIndex, currentSection.questions.length]);  // ✅ Smarter deps!
-
+        // ✅ ALWAYS sync when section changes
+        setCurrentQuestions(sectionQuestionsFlat);
+    }, [currentSectionIndex]);
     const [errors, setErrors] = useState({});
     const [quizErrors, setQuizErrors] = useState({});
     const [validationMessage, setValidationMessage] = useState("");
@@ -470,15 +466,21 @@ function CreateTest() {
 
     const addQuestion = () => {
         const newQuestion = { questionText: "", options: ["", ""], correctIdx: 0 };
-        setSections(sections.map((sec, i) =>
-            i === currentSectionIndex
-                ? { ...sec, questions: [...sec.questions, newQuestion] }
-                : sec
-        ));
+
+        setSections(prev =>
+            prev.map((sec, i) =>
+                i === currentSectionIndex
+                    ? { ...sec, questions: [...sec.questions, newQuestion] }
+                    : sec
+            )
+        );
+
+        // ✅ sync AFTER section update
         setCurrentQuestions(prev => [...prev, newQuestion]);
+
+        // ✅ FIX: move to last page automatically
+        setCurrentPage(Math.floor((currentQuestions.length) / QUESTIONS_PER_PAGE));
     };
-
-
 
     // ✅ CORRECT
     const deleteQuestion = (idx) => {

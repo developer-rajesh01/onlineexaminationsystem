@@ -679,8 +679,7 @@ export default function StudentDashboard() {
               {[
                 { key: "active", label: "Active" },
                 { key: "completed", label: "Completed" },
-                { key: "all", label: "All" },
-              ].map(({ key, label }) => {
+                ].map(({ key, label }) => {
                 const active = tab === key;
                 const count = key === "active" ? badgeCountActive() : key === "completed" ? badgeCountCompleted() : null;
                 return (
@@ -691,6 +690,10 @@ export default function StudentDashboard() {
                       setPage(0);
                     }}
                     className={tabButtonClass(key, active)}
+                    onMouseEnter={() => {
+
+                      import("../SecureTestPage");
+                    }}
                   >
                     {label}
                     {count !== null && <span className={badgeClass(key, active)}>{count}</span>}

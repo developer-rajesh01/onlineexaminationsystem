@@ -274,6 +274,7 @@ export default function SecureTestPage() {
             localStorage.removeItem(`attempt_${attemptId}_answers`);
             sessionStorage.removeItem(SESSION_KEY);
             setTimeout(() => navigate("/student/dashboard"), 300);
+            window.history.replaceState(null, "", "/onlineexaminationsystem/student/dashboard");
         }
     }, [attemptId, localAnswers, navigate, attempt, test]);  // ✅ FIXED DEPS
 
@@ -368,7 +369,8 @@ export default function SecureTestPage() {
             // Force redirect to dashboard
             setTimeout(() => {
                 navigate("/student/dashboard", { replace: true });
-                window.history.replaceState(null, "", "/student/dashboard");
+                // window.history.replaceState(null, "", "/student/dashboard");
+                window.history.replaceState(null, "", "/onlineexaminationsystem/student/dashboard");
             }, 500);
         }
     }, [attemptId, attempt, blocked, localAnswers, navigate, currentSection, test, sections]);
@@ -602,6 +604,7 @@ export default function SecureTestPage() {
 
                     alert("Invalid attempt - no testId. Go back to dashboard.");
                     navigate("/student/dashboard");
+                    window.history.replaceState(null, "", "/onlineexaminationsystem/student/dashboard");
                     return;
                 }
 
@@ -673,6 +676,7 @@ export default function SecureTestPage() {
                 if (!cancelled) {
                     console.error("❌ LOAD FAILED:", err);
                     navigate("/student/dashboard");
+                    window.history.replaceState(null, "", "/onlineexaminationsystem/student/dashboard");
                 }
             } finally {
                 if (mountedRef.current && !cancelled) setLoading(false);

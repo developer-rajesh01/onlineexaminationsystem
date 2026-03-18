@@ -26,7 +26,6 @@ function FacultySidebar({ selectedSection, onSelect, isMobileOpen, onMobileToggl
         { label: "Dashboard", to: "/dashboard", icon: HiOutlineViewGrid },
         { label: "Create Test", to: "/createTest", icon: HiOutlineClipboardList },
         { label: "Scoreboard", to: "/scoreboard", icon: HiOutlineChartBar },
-        { label: "Questions", to: "/questions", icon: HiOutlineQuestionMarkCircle },
     ];
 
     return (
@@ -153,7 +152,7 @@ function FacultyHeader({ selectedSection, onMobileToggle, isMobileOpen }) {
             shadow-2xl shadow-black/30 backdrop-blur-xl
         ">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex h-20 items-center justify-between">
+                <div className="flex h-[80px] items-center justify-between">
                     {/* Left - Logo + Brand */}
                     <div className="flex items-center gap-4">
                         <button
@@ -217,6 +216,17 @@ function FacultyHeader({ selectedSection, onMobileToggle, isMobileOpen }) {
 function StudentHeader() {
     const navigate = useNavigate();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    useEffect(() => {
+        if (isMobileMenuOpen) {
+            document.body.style.overflow = "hidden";
+        } else {
+            document.body.style.overflow = "auto";
+        }
+
+        return () => {
+            document.body.style.overflow = "auto";
+        };
+    }, [isMobileMenuOpen]);
 
     const handleLogout = async () => {
         try {
@@ -252,14 +262,14 @@ function StudentHeader() {
             {isMobileMenuOpen && (
                 <div
                     className="fixed inset-0 bg-black/50 z-40 sm:hidden"
-                    onClick={() => setIsMobileMenuOpen(false)}
+                    onTouchMove={(e) => e.preventDefault()}
                 />
             )}
 
             {/* Mobile Menu Dropdown */}
-            <div className={`sm:hidden fixed top-20 right-4 z-50 transition-all duration-300 ${isMobileMenuOpen
-                    ? 'translate-y-0 opacity-100 scale-100'
-                    : '-translate-y-4 opacity-0 scale-95'
+            <div className={`sm:hidden fixed top-[80px] right-4 z-50 transition-opacity duration-200 ${isMobileMenuOpen
+                    ? "opacity-100"
+                    : "opacity-0 pointer-events-none"
                 }`}>
                 <div className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl shadow-black/20 border border-white/50 w-64 py-2">
                     {menuItems.map((item, index) => (
@@ -290,7 +300,7 @@ function StudentHeader() {
                 shadow-2xl shadow-indigo-500/40 backdrop-blur-xl
             ">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex h-20 items-center justify-between">
+                    <div className="flex h-[80px] items-center justify-between">
                         {/* Logo */}
                         <Link to="/student/dashboard" className="flex items-center gap-3 group">
                             <div className="
@@ -408,7 +418,7 @@ function AuthHeader() {
             shadow-2xl shadow-indigo-500/50 backdrop-blur-xl
         ">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex h-20 items-center justify-between">
+                <div className="flex h-[80px] items-center justify-between">
                     {/* Logo - Fixed positioning */}
                     <Link to="/" className="flex items-center gap-3 group flex-shrink-0">
                         <div className="
@@ -532,11 +542,11 @@ function Layout() {
             </div>
         );
     }
-
-    // ── Faculty layout ──
+    // ── Faculty layout ── ✅ NO GAPS FIXED
     if (role === "faculty") {
         return (
             <div className="flex h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 overflow-hidden">
+                {/* FIXED SIDEBAR - 320px */}
                 <FacultySidebar
                     selectedSection={selectedSection}
                     onSelect={setSelectedSection}
@@ -544,34 +554,38 @@ function Layout() {
                     onMobileToggle={() => setIsMobileOpen(!isMobileOpen)}
                 />
 
-                <div className="flex-1 flex flex-col overflow-hidden lg:ml-0 ml-0">
+                {/* MAIN CONTENT - PERFECT ALIGNMENT */}
+                <div className="flex-1 flex flex-col ml-0 overflow-hidden">
+                    {/* Header - Full width */}
                     <FacultyHeader
                         selectedSection={selectedSection}
                         isMobileOpen={isMobileOpen}
                         onMobileToggle={() => setIsMobileOpen(!isMobileOpen)}
                     />
 
-                    <main className="flex-1 overflow-y-auto bg-gradient-to-br from-white via-slate-50/50 to-indigo-50/20">
-                        <div className="max-w-7xl mx-auto px-6 lg:px-8 py-10 lg:py-12">
-                            <Outlet />
-                        </div>
+                    {/* Content - NO GAPS! */}
+                    <main className="flex-1 overflow-y-auto bg-gradient-to-br from-white via-slate-50/50 to-indigo-50/20 p-6 lg:p-10">
+                        {/* REMOVED max-w-7xl mx-auto - THIS WAS CAUSING GAPS */}
+                        <Outlet />
                     </main>
                 </div>
             </div>
         );
     }
 
+
+
     // ── Student layout ──
     if (role === "student") {
         return (
-            <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50/50 flex flex-col">
+            <div className="min-h-[100dvh] bg-gradient-to-br from-indigo-50 via-white to-purple-50/50 flex flex-col">
                 {!isStudentExam && <StudentHeader />}
                 <main className="flex-1">
                     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-12">
                         <Outlet />
                     </div>
                 </main>
-                <Footer />
+                
             </div>
         );
     }
