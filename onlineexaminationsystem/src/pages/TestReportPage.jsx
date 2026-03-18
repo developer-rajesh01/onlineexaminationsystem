@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { Doughnut } from "react-chartjs-2";
+import API_BASE_URL from "../config/api";
 
 function seededShuffle(array, seed) {
     // ... same as before ...
@@ -27,7 +28,7 @@ function TestReportPage() {
                 const token = localStorage.getItem("token");
                 if (!token) throw new Error("Please login again");
 
-                const aRes = await fetch(`http://localhost:5000/api/attempts/${attemptId}`, {
+                const aRes = await fetch(`${API_BASE_URL}/api/attempts/${attemptId}`, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 if (!aRes.ok) throw new Error("Failed to load attempt details");
@@ -45,7 +46,7 @@ function TestReportPage() {
 
                 if (!testId) throw new Error("Test not found for this attempt");
 
-                const tRes = await fetch(`http://localhost:5000/api/tests/${testId}`, {
+                const tRes = await fetch(`${API_BASE_URL}/api/tests/${testId}`, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 if (!tRes.ok) throw new Error("Failed to load test questions");

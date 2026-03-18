@@ -1,6 +1,8 @@
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { v4 as uuidv4 } from "uuid";
+
 
 /**
  * Register a new user.
@@ -73,7 +75,21 @@ export const registerUser = async (req, res) => {
     return res.status(500).json({ message: error.message || "Server Error" });
   }
 };
+export const logoutUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
 
+    const user = await User.findById(userId);
+
+    user.sessionId = null;
+    await user.save();
+
+    res.json({ message: "Logged out successfully" });
+
+  } catch (error) {
+    res.status(500).json({ message: "Logout failed" });
+  }
+};
 /**
  * Login a user.
  * Expects JSON body: { email, password }
@@ -81,7 +97,7 @@ export const registerUser = async (req, res) => {
  */
 export const loginUser = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, forceLogin } = req.body;
     if (!email || !password) {
       return res.status(400).json({ message: "Email and password are required" });
     }
@@ -97,11 +113,22 @@ export const loginUser = async (req, res) => {
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid email or password" });
     }
-
+    if (user.sessionId && !forceLogin) {
+      return res.status(409).json({
+        message: "Already logged in on another device",
+        allowForceLogin: true
+      });
+    
+    }
+    // Create new session for this login
+    const newSessionId = uuidv4();
+    user.sessionId = newSessionId;
+    await user.save();
     // Build JWT payload (include useful user info)
     const jwtPayload = {
       id: user._id,
       role: user.role,
+      sessionId: newSessionId,
       institute: user.institute,
       branchBatch: user.branchBatch || "",
     };

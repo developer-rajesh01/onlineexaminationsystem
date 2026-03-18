@@ -1,6 +1,7 @@
 // src/components/TeacherScoreboard.jsx  (or wherever you keep it)
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import API_BASE_URL from "../../config/api";
 
 const TeacherScoreboard = () => {
   const [tests, setTests] = useState([]);
@@ -18,7 +19,7 @@ const TeacherScoreboard = () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`http://localhost:5000/api/tests?email=${encodeURIComponent(email)}`);
+      const res = await fetch(`${API_BASE_URL}/api/tests?email=${encodeURIComponent(email)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 

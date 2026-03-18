@@ -6,6 +6,7 @@ import {
   ChevronRightIcon,
   DocumentTextIcon,
 } from "@heroicons/react/24/outline";
+import API_BASE_URL from "../../config/api";
 
 const PAGE_SIZE = 12;
 
@@ -16,7 +17,7 @@ async function fetchTestsFromApi({ email, course, institute, signal }) {
   if (course) params.append("course", course);
   if (institute) params.append("institute", institute);
 
-  const url = `http://localhost:5000/api/tests?${params.toString()}`;
+  const url = `${API_BASE_URL}/api/tests?${params.toString()}`;
   console.log("[API] GET", url);
 
   const res = await fetch(url, { signal, credentials: "include" });
@@ -201,7 +202,7 @@ export default function StudentDashboard() {
           return;
         }
 
-        const res = await fetch(`http://localhost:5000/api/attempts?email=${encodeURIComponent(studentEmail)}`, {
+        const res = await fetch(`${API_BASE_URL}/api/attempts?email=${encodeURIComponent(studentEmail)}`, {
           headers: {
             Authorization: `Bearer ${authToken}`,
             'Content-Type': 'application/json'
@@ -338,7 +339,7 @@ export default function StudentDashboard() {
 
   // socket connect & events
   useEffect(() => {
-    const serverUrl = "http://localhost:5000";
+    const serverUrl = `${API_BASE_URL}`;
     try {
       const socket = io(serverUrl, {
         path: "/socket.io",
@@ -529,7 +530,7 @@ export default function StudentDashboard() {
 
       console.log("🚀 Starting attempt for test:", id);
 
-      const response = await fetch(`http://localhost:5000/api/attempts/${id}/start`, {
+      const response = await fetch(`${API_BASE_URL}/api/attempts/${id}/start`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

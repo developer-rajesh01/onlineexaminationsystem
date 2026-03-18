@@ -5,6 +5,8 @@ import { useNavigate, useLocation, useParams } from "react-router-dom";
 import FileUploader from "../../component/FileUploader";
 // import DatabaseQuestions from "./DatabaseQuestionSelector"; 
 import DatabaseQuestionSelector from "./DatabaseQuestionSelector";
+import API_BASE_URL from "../../config/api";
+
 
 const QUESTIONS_PER_PAGE = 10;
 
@@ -214,7 +216,7 @@ function CreateTest() {
                 // 2️⃣ URL edit (id param)
                 if (id) {
                     console.log("🟢 Fetching API:", id);
-                    const res = await fetch(`http://localhost:5000/api/tests/${id}`, {
+                    const res = await fetch(`${API_BASE_URL}/api/tests/${id}`, {
                         credentials: "include"
                     });
 
@@ -263,7 +265,7 @@ function CreateTest() {
 
 
     useEffect(() => {
-        if (startTimestampInput || quiz.startDate || quiz.startTime) return;  
+        if (startTimestampInput || quiz.startDate || quiz.startTime) return;
         const d = quiz.startDate;
         const t = quiz.startTime;
         if (!d || !t) return;
@@ -587,12 +589,12 @@ function CreateTest() {
             institute: (quiz.institute || localStorage.getItem("institute") || institute || "Poornima University").trim(),
             facultyEmail,
 
-            // 🔥 PERFECT FORMAT - Backend LOVES this!
             sections: sections.map(sec => ({
                 name: sec.name || "General",
                 marks: Number(sec.marks) || 10,
                 questions: sec.questions.map(q => ({
                     questionText: String(q.questionText || ""),
+                    correctIdx: Number(q.correctIdx ?? 0),   // ⭐ ADD THIS LINE
                     options: (Array.isArray(q.options) ? q.options.slice(0, 4) : ["", "", "", ""]).map(opt => ({
                         text: String(opt || "")
                     }))
@@ -618,7 +620,7 @@ function CreateTest() {
 
                 // Delete old test first (ignore errors)
                 try {
-                    await fetch(`http://localhost:5000/api/tests/${targetId}`, {
+                    await fetch(`${API_BASE_URL}/api/tests/${targetId}`, {
                         method: "DELETE",
                         credentials: "include"
                     });
@@ -769,7 +771,7 @@ function CreateTest() {
 
                                     </div>
                                 ) : (
- 
+
                                     // ✅ Original input for other fields
                                     <div className="relative">
                                         <input
@@ -969,7 +971,7 @@ function CreateTest() {
                         </div>
                     </div>
                     <span className="font-semibold text-lg text-indigo-900">
-                        
+
                         Questions: {sections.reduce((sum, sec) => sum + sec.questions.length, 0)}
                     </span>
                 </div>

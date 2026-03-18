@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { AlertCircle, Clock, CheckCircle, Circle } from "lucide-react";
+import API_BASE_URL from "../config/api";
 
 const SESSION_KEY = "currentTestAttempt";
 const START_DISABLED_KEY = "startDisabled";
@@ -166,14 +167,32 @@ export default function SecureTestPage() {
     const [headerVisible, setHeaderVisible] = useState(true);
     const [headerPermanentlyHidden, setHeaderPermanentlyHidden] = useState(false);
     const [completedSections, setCompletedSections] = useState({});
+    const allQuestions = test?.questions || [];
+    const totalQuestions = allQuestions.length;
+
+    const answeredCount = Object.keys(localAnswers).filter(
+        id => allQuestions.some(q => q._id === id)
+    ).length;
+
+    const progress = totalQuestions
+        ? ((answeredCount / totalQuestions) * 100).toFixed(0)
+        : "0";
     const sections = useMemo(() => {
-        return (test?.questions || []).reduce((acc, q, qIndex) => {
+        return (allQuestions || []).reduce((acc, q, qIndex) => {
             const s = q.section || "Default";
             if (!acc[s]) acc[s] = [];
             acc[s].push(qIndex);
             return acc;
         }, {});
-    }, [test])
+    }, [allQuestions]);
+    // const sections = useMemo(() => {
+    //     return (test?.questions || []).reduce((acc, q, qIndex) => {
+    //         const s = q.section || "Default";
+    //         if (!acc[s]) acc[s] = [];
+    //         acc[s].push(qIndex);
+    //         return acc;
+    //     }, {});
+    // }, [test])
     const tickRef = useRef(null);
     const submittingRef = useRef(false);
     const mountedRef = useRef(true);
@@ -224,7 +243,7 @@ export default function SecureTestPage() {
                 const sessionData = JSON.parse(pendingData);
                 if (sessionData.attemptId === attemptId) {
                     const loadedAnswers = {};
-                    sessionData.answers.forEach(ans => loadedAnswers[ans.qIndex] = ans.selectedIdx);
+                    sessionData.answers.forEach(ans => loadedAnswers[ans.questionId] = ans.selectedIdx);
                     setLocalAnswers(prev => ({ ...prev, ...loadedAnswers }));
                 }
             } catch (e) { }
@@ -238,11 +257,11 @@ export default function SecureTestPage() {
         setHeaderPermanentlyHidden(true);
 
         try {
-            const answersArr = Object.entries(localAnswers).map(([qIndexStr, selectedIdx]) => ({
-                qIndex: Number(qIndexStr),
+            const answersArr = Object.entries(localAnswers).map(([questionId, selectedIdx]) => ({
+                questionId,
                 selectedIdx,
             }));
-            await fetch(`http://localhost:5000/api/attempts/${attemptId}/submit`, {
+            await fetch(`${API_BASE_URL}/api/attempts/${attemptId}/submit`, {
                 method: "PUT",
                 credentials: "include",
                 headers: { "Content-Type": "application/json" },
@@ -266,10 +285,10 @@ export default function SecureTestPage() {
             const sectionQuestions = sections[currentSection] || [];
             const sectionAnswers = {};
 
-            // Filter answers for THIS SECTION ONLY
             sectionQuestions.forEach(qIdx => {
-                if (localAnswers[qIdx] !== undefined) {
-                    sectionAnswers[qIdx] = localAnswers[qIdx];
+                const qId = allQuestions[qIdx]?._id;
+                if (localAnswers[qId] !== undefined) {
+                    sectionAnswers[qId] = localAnswers[qId];
                 }
             });
 
@@ -306,6 +325,15 @@ export default function SecureTestPage() {
             });
 
             setLocalAnswers(allAnswers);
+
+            console.log("Submitting answers object:", allAnswers);
+            console.log(
+                "Submitting answers array:",
+                Object.entries(allAnswers).map(([questionId, selectedIdx]) => ({
+                    questionId,
+                    selectedIdx
+                }))
+            );
             // FINAL SERVER SUBMIT
             localStorage.removeItem(`attempt_${attemptId}_pending_session`);
             Object.keys(localStorage).forEach(key => {
@@ -314,17 +342,21 @@ export default function SecureTestPage() {
                 }
             });
 
-            const res = await fetch(`http://localhost:5000/api/attempts/${attemptId}/submit`, {
-                method: "PUT", credentials: "include",
+            const res = await fetch(`${API_BASE_URL}/api/attempts/${attemptId}/submit`, {
+                
+                method: "PUT",
+                credentials: "include",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    answers: Object.entries(allAnswers).map(([qIndexStr, selectedIdx]) => ({
-                        qIndex: Number(qIndexStr), selectedIdx
+                    answers: Object.entries(allAnswers).map(([questionId, selectedIdx]) => ({
+                        questionId,
+                        selectedIdx
                     })),
-                    forfeit: false, reason: auto ? "time_up" : "manual_submit"
+                    forfeit: false,
+                    reason: auto ? "time_up" : "manual_submit"
                 })
             });
-
+           
             const body = await res.json().catch(() => ({}));
         } catch (err) {
             alert("❌ Submit failed");
@@ -340,6 +372,19 @@ export default function SecureTestPage() {
             }, 500);
         }
     }, [attemptId, attempt, blocked, localAnswers, navigate, currentSection, test, sections]);
+    // 🔵 AUTO SAVE EVERY 10 SECONDS (PROTECTS AGAINST REFRESH / CRASH)
+    useEffect(() => {
+        const interval = setInterval(() => {
+            try {
+                saveAnswersLocally(localAnswers);
+                console.log("Auto-saved answers");
+            } catch (err) {
+                console.error("Auto-save failed", err);
+            }
+        }, 10000); // 10 seconds
+
+        return () => clearInterval(interval);
+    }, [localAnswers]);
     // === FORCE FULLSCREEN ON MOUNT ===
     useEffect(() => {
         const enterFullscreen = async () => {
@@ -527,7 +572,7 @@ export default function SecureTestPage() {
                 console.log("🔍 LOADING attemptId:", attemptId);
 
                 // 1. GET attempt
-                const res = await fetch(`http://localhost:5000/api/attempts/${attemptId}`, {
+                const res = await fetch(`${API_BASE_URL}/api/attempts/${attemptId}`, {
                     credentials: "include"
                 });
                 console.log("🔍 ATTEMPT STATUS:", res.status);
@@ -569,7 +614,7 @@ export default function SecureTestPage() {
 
                 // 5. GET test
                 console.log("🔍 FETCHING test:", testId);
-                const tRes = await fetch(`http://localhost:5000/api/tests/${testId}`);
+                const tRes = await fetch(`${API_BASE_URL}/api/tests/${testId}`);
                 if (!tRes.ok) throw new Error("Test not found");
 
                 const tb = await tRes.json();
@@ -597,8 +642,19 @@ export default function SecureTestPage() {
 
                 // 7. Load answers FIRST ✅ MOVED BEFORE setLoading
                 const serverAnswers = {};
+
                 (a.answers || []).forEach((ans) => {
-                    if (typeof ans.selectedIdx === "number") serverAnswers[ans.qIndex] = ans.selectedIdx;
+                    const question = shuffledQuestions.find(q => q._id === ans.questionId);
+
+                    if (!question) return;
+
+                    const optionIndex = question.options.findIndex(
+                        opt => opt._id === ans.selectedOptionId
+                    );
+
+                    if (optionIndex !== -1) {
+                        serverAnswers[ans.questionId] = optionIndex;
+                    }
                 });
                 const local = readAnswersLocally();
                 setLocalAnswers({ ...serverAnswers, ...local });
@@ -737,17 +793,26 @@ export default function SecureTestPage() {
 
     // === ANSWER HANDLING ===
     const selectAnswer = (qIdx, idx) => {
+        const questionId = allQuestions[qIdx]?._id;
+
+        if (!questionId) return;
+
         setLocalAnswers(prev => {
-            const updated = { ...prev, [qIdx]: idx };
+            const updated = { ...prev, [questionId]: idx };
+
+            console.log("Answer selected:", questionId, idx);
+
             saveAnswersLocally(updated);
+
             try {
                 const s = readAttemptFromSession() || {};
-                s.answers = Object.entries(updated).map(([qIndexStr, selectedIdx]) => ({
-                    qIndex: Number(qIndexStr),
-                    selectedIdx,
+                s.answers = Object.entries(updated).map(([questionId, selectedIdx]) => ({
+                    questionId,
+                    selectedIdx
                 }));
                 writeAttemptToSession(s);
             } catch (e) { }
+
             return updated;
         });
     };
@@ -773,19 +838,27 @@ export default function SecureTestPage() {
     const saveAnswersToServer = async () => {
         try {
             const payload = {
-                answers: Object.entries(localAnswers).map(([qIndexStr, selectedIdx]) => ({
-                    qIndex: Number(qIndexStr),
+                answers: Object.entries(localAnswers).map(([questionId, selectedIdx]) => ({
+                    questionId,
                     selectedIdx,
-                })),
+                }))
             };
-            await fetch(`http://localhost:5000/api/attempts/${attemptId}/save`, {
+
+            const res = await fetch(`${API_BASE_URL}/api/attempts/${attemptId}/save`, {
                 method: "PUT",
                 credentials: "include",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
             });
+
+            if (!res.ok) {
+                throw new Error("Save failed");
+            }
+
             saveAnswersLocally(localAnswers);
+
         } catch (err) {
+            console.error("Save error:", err);
             saveAnswersLocally(localAnswers);
         }
     };
@@ -816,7 +889,7 @@ export default function SecureTestPage() {
                                 {timeLabel}
                             </div>
                             <div className="text-sm bg-white/20 px-4 py-2 rounded-lg">
-                                {Object.keys(localAnswers || {}).length}/{test?.questions?.length || 0}
+                                {answeredCount}/{test?.questions?.length || 0}
                             </div>
 
 
@@ -844,7 +917,9 @@ export default function SecureTestPage() {
                         const color = sectionColors[index % sectionColors.length];
 
                         // 🟢 PROGRESS INSIDE MAP = NO ESLint ERROR
-                        const answeredInSection = questionIndices.filter(idx => localAnswers[idx] !== undefined).length;
+                        const answeredInSection = questionIndices.filter(
+                            idx => localAnswers[allQuestions[idx]?._id] !== undefined
+                        ).length;
                         const progress = questionIndices.length
                             ? ((answeredInSection / questionIndices.length) * 100).toFixed(0)
                             : 0;
@@ -912,14 +987,13 @@ export default function SecureTestPage() {
     }
 
 
-    const allQuestions = test?.questions || [];
-    const totalQuestions = allQuestions.length;
-    // 🟢 SECTIONS - INLINE (no function)
+    
+    // const answeredCount = Object.keys(localAnswers).filter(
+    //     id => allQuestions.some(q => q._id === id)
+    // ).length;
+    // const progress = totalQuestions ? ((answeredCount / totalQuestions) * 100).toFixed(0) : '0';
 
-    // const sections = getSections();
-    const answeredCount = Object.keys(localAnswers).length;
-    const progress = totalQuestions ? ((answeredCount / totalQuestions) * 100).toFixed(0) : '0';
-
+    // const totalQuestions = allQuestions.length;
 
     // const sections = getSections();  
     // 🟢 CURRENT QUESTION OBJECT
@@ -1025,8 +1099,9 @@ export default function SecureTestPage() {
                     <div className="flex-1 overflow-y-auto p-5">
                         <div className="grid grid-cols-5 gap-3">
                             {(sections[currentSection] || []).map((idx) => {
-                                const isAnswered = localAnswers[idx] !== undefined;
-                                const isCurrent = currentSection === allQuestions[idx]?.section && idx === currentQIndex;
+                               
+                                const isAnswered = localAnswers[allQuestions[idx]?._id] !== undefined;
+                                const isCurrent = idx === currentQIndex;
                                 return (
                                     <button
                                         key={idx}
@@ -1103,7 +1178,8 @@ export default function SecureTestPage() {
                             {Object.keys(sections).map((s) => {
                                 const isCompleted =
                                     completedSections[s] ||
-                                    sections[s].every(q => localAnswers[q] !== undefined); return (
+                                    sections[s].every(q => localAnswers[allQuestions[q]?._id] !== undefined);
+                                return (
                                         <button
                                             key={s}
                                             onClick={() => setCurrentSection(s)}
@@ -1135,11 +1211,11 @@ export default function SecureTestPage() {
                         <div className="space-y-4 mt-6">
                             {Array.isArray(currentQuestion?.options) && currentQuestion.options.length > 0 ? (
                                 currentQuestion.options.map((opt, i) => (
-                                    <label key={i} className={`flex items-center p-4 rounded-lg border cursor-pointer transition-all ${localAnswers[currentQIndex] === i ? "border-indigo-600 bg-indigo-50" : "border-gray-200 hover:border-gray-300 bg-white"}`}>
+                                    <label key={i} className={`flex items-center p-4 rounded-lg border cursor-pointer transition-all ${localAnswers[currentQuestion?._id] === i ? "border-indigo-600 bg-indigo-50" : "border-gray-200 hover:border-gray-300 bg-white"}`}>
                                         <input
                                             type="radio"
                                             name={`q${currentQIndex}`}
-                                            checked={localAnswers[currentQIndex] === i}
+                                            checked={localAnswers[currentQuestion?._id] === i}
                                             onChange={() => selectAnswer(currentQIndex, i)}
                                             className="w-5 h-5 text-indigo-600 focus:ring-indigo-500"
                                         />
@@ -1168,7 +1244,7 @@ export default function SecureTestPage() {
                         <div className="flex gap-4">
                             <button
                                 onClick={async () => {
-                                    await saveAnswersToServer();
+                                    // await saveAnswersToServer();
 
                                     // 🟢 SAVE TO LOCALSTORAGE + STATE
                                     const completedKey = `attempt_${attemptId}_completed_sections`;

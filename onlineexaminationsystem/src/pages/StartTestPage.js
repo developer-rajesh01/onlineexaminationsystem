@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { AlertCircle, Lock, PlayCircle, XCircle } from "lucide-react";
+import API_BASE_URL from "../config/api";
 
 
 const SESSION_KEY = "currentTestAttempt";
@@ -85,7 +86,7 @@ export default function StartTestPage() {
         let mounted = true;
         const load = async () => {
             try {
-                const res = await fetch(`http://localhost:5000/api/tests/${testId}`);
+                const res = await fetch(`${API_BASE_URL}/api/tests/${testId}`);
                 if (!res.ok) throw new Error("Failed to load test");
                 const data = await res.json();
                 if (mounted) setTest(data.test || data);

@@ -12,6 +12,8 @@ import {
   Tooltip,
   Legend,
 } from 'chart.js';
+import API_BASE_URL from "../../config/api";
+
 
 ChartJS.register(
   CategoryScale, LinearScale, PointElement, LineElement,
@@ -106,7 +108,7 @@ function AttemptDetailModal({ attempt, onClose }) {
         const token = localStorage.getItem("token");
 
         const res = await fetch(
-          `http://localhost:5000/api/tests/${attempt.testId}`,
+          `${API_BASE_URL}/api/tests/${attempt.testId}`,
           {
             headers: { Authorization: `Bearer ${token}` }
           }
@@ -401,7 +403,7 @@ function Scoreboard() {
         if (course) params.append("course", course);
         if (institute) params.append("institute", institute);
 
-        const res = await fetch(`http://localhost:5000/api/tests?${params.toString()}`, {
+        const res = await fetch(`${API_BASE_URL}/api/tests?${params.toString()}`, {
           signal: ctl.signal,
           credentials: "include",
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -453,7 +455,7 @@ function Scoreboard() {
           return;
         }
       }
-      const res = await fetch(`http://localhost:5000/api/attempts?email=${encodeURIComponent(studentEmail)}`, {
+      const res = await fetch(`${API_BASE_URL}/api/attempts?email=${encodeURIComponent(studentEmail)}`, {
         headers: { 'Authorization': `Bearer ${token}` },
         credentials: "include"
       });

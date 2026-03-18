@@ -10,6 +10,7 @@ import {
   ChevronRightIcon,
   DocumentTextIcon,
 } from "@heroicons/react/24/outline";
+import API_BASE_URL from "../../config/api";
 
 const PAGE_SIZE = 12;
 
@@ -17,7 +18,7 @@ const PAGE_SIZE = 12;
 async function fetchTestsFromApi({ email, signal }) {
   const params = new URLSearchParams();
   if (email) params.append("email", email);
-  const url = `http://localhost:5000/api/tests?${params.toString()}`;
+  const url = `${API_BASE_URL}/api/tests?${params.toString()}`;
   const res = await fetch(url, { signal, credentials: "include" });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -32,7 +33,7 @@ async function fetchTestsFromApi({ email, signal }) {
 
 // API: Delete test
 async function deleteTestFromApi(id) {
-  const res = await fetch(`http://localhost:5000/api/tests/${id}`, {
+  const res = await fetch(`${API_BASE_URL}/api/tests/${id}`, {
     method: "DELETE",
     credentials: "include",
   });
@@ -172,7 +173,7 @@ export default function Dashboard() {
   }, [loadAll]);
 
   useEffect(() => {
-    const serverUrl = "http://localhost:5000";
+    const serverUrl = `${API_BASE_URL}`;
     try {
       const socket = io(serverUrl, {
         path: "/socket.io",
@@ -507,7 +508,7 @@ export default function Dashboard() {
                           {isCompleted ? (
                             // Completed: View Report (no delete)
                             <NavLink
-                              to={`/viewReport/${id}`}
+                              to={`/test-report/${id}`}
                               className="flex-1 flex items-center justify-center gap-1.5 py-3 text-sm font-medium text-green-600 hover:bg-green-100 transition"
                             >
                               <DocumentTextIcon className="w-4 h-4" />

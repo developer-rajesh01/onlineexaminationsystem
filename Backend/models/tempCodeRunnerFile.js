@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 const userSchema = new mongoose.Schema(
@@ -16,6 +17,14 @@ const userSchema = new mongoose.Schema(
       },
       default: "",
     },
+    branchBatch: {
+      type: String,
+      required: function () {
+        return this.role === "student";
+      },
+      default: "",
+    },
+
     // ✅ Added for single-device login
     sessionId: {
       type: String,

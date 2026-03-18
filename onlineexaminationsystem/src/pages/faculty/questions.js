@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { FiUpload, FiTrash2, FiCheckCircle, FiAlertCircle, FiInfo, FiBook, FiUser } from "react-icons/fi";
 import FileUploader from "../../component/FileUploader";
-
+import API_BASE_URL from "../../config/api";
 function Questions() {
-  const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:5000";
+  const API_BASE = process.env.REACT_APP_API_URL || `${API_BASE_URL}`;
 
   // ✅ NEW: Subject and Teacher states
   const [subjectName, setSubjectName] = useState("");

@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { FiCheck, FiPlus, FiSearch, FiX } from "react-icons/fi";
+import API_BASE_URL from "../../config/api";
+
 
 const DatabaseQuestionSelector = ({ onImportQuestions, onClose }) => {
     const [questions, setQuestions] = useState([]);
@@ -16,7 +18,7 @@ const DatabaseQuestionSelector = ({ onImportQuestions, onClose }) => {
     const fetchAllQuestions = async () => {
         setLoading(true);
         try {
-            const res = await fetch("http://localhost:5000/api/questions", {
+            const res = await fetch(`${API_BASE_URL}/api/questions`, {
                 credentials: "include"
             });
 

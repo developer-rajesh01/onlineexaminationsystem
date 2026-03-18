@@ -74,7 +74,7 @@ export const saveAttemptProgress = async (req, res) => {
             req.params.id,
             {
                 answers: answers.map(ans => ({
-                    qIndex: ans.qIndex,
+                    questionId: ans.questionId,
                     selectedIdx: ans.selectedIdx
                 })),
                 updatedAt: new Date()
@@ -102,7 +102,7 @@ export const submitAttempt = async (req, res) => {
         answers.forEach(ans => {
             const question = test.sections
                 .flatMap(sec => sec.questions)
-                .find((_, idx) => idx === ans.qIndex);
+                .find((_, idx) => idx === ans.questionId);
 
             if (question && ans.selectedIdx === question.correctIdx) {
                 score += 1;
@@ -112,7 +112,7 @@ export const submitAttempt = async (req, res) => {
         await Attempt.findByIdAndUpdate(req.params.id, {
             status: forfeit ? "forfeited" : "completed",
             answers: answers.map(ans => ({
-                qIndex: ans.qIndex,
+                questionId: ans.questionId,
                 selectedIdx: ans.selectedIdx
             })),
             score,

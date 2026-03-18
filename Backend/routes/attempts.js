@@ -111,17 +111,21 @@ router.put("/:attemptId/submit", async (req, res) => {
 
     const normalizedAnswers = answers.map(ans => {
 
-        const question = allQuestions[ans.qIndex];
+        const question = allQuestions.find(
+            q => q._id.toString() === ans.questionId
+        );
+
         if (!question) return null;
+
+        const option = question.options?.[ans.selectedIdx];
 
         return {
             questionId: question._id,
-            selectedOptionId: question.options?.[ans.selectedIdx]?._id || null,
+            selectedOptionId: option?._id || null,
             submittedAt: new Date()
         };
 
     }).filter(Boolean);
-
     // score
     let score = 0;
 
@@ -157,6 +161,27 @@ router.put("/:attemptId/submit", async (req, res) => {
 
 });
 
+router.put("/attempts/:attemptId/save", async (req, res) => {
+    try {
+        const { attemptId } = req.params;
+        const { answers } = req.body;
+
+        const attempt = await Attempt.findById(attemptId);
+
+        if (!attempt) {
+            return res.status(404).json({ message: "Attempt not found" });
+        }
+
+        attempt.answers = answers;
+        await attempt.save();
+
+        res.json({ success: true, message: "Answers saved successfully" });
+
+    } catch (err) {
+        console.error("Save error:", err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
 /*
 =========================================
 3️⃣ GET SINGLE ATTEMPT

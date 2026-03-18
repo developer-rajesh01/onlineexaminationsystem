@@ -1,7 +1,7 @@
 import express from "express";
 import Test from "../models/Test.js";
 import mongoose from 'mongoose'; 
-
+import protect from "../middlewares/authMiddleware.js";
 const router = express.Router();
 
 // helper: compute live status
@@ -34,7 +34,7 @@ function deriveDateAndTime(d) {
     };
 }
 
-router.post("/", async (req, res) => {
+router.post("/", protect, async (req, res) => {
     try {
         const { title, duration, startTimestamp, startDate, startTime, targetAudience, institute, author, sections = [], facultyEmail } = req.body;
 
@@ -100,7 +100,7 @@ router.post("/", async (req, res) => {
 
 
 // List tests with optional filtering; returns liveStatus + serverTime for client sync
-router.get("/", async (req, res) => {
+router.get("/", protect, async (req, res) => {
     try {
         const { email, status } = req.query;
         const filter = {};
@@ -124,7 +124,7 @@ router.get("/", async (req, res) => {
 });
 
 // Get test by id (with serverTime and liveStatus)
-router.get("/:id", async (req, res) => {
+router.get("/:id", protect, async (req, res) => {
     try {
         const { id } = req.params;
         if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -149,7 +149,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // Update test by id (validate passMarks < totalMarks when updated)
-router.put("/:id", async (req, res) => {
+router.put("/:id", protect , async (req, res) => {
     try {
         const update = { ...req.body };
 
@@ -259,7 +259,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // Delete test by id
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", protect, async (req, res) => {
     try {
         const test = await Test.findByIdAndDelete(req.params.id);
         if (!test) return res.status(404).json({ message: "Test not found" });

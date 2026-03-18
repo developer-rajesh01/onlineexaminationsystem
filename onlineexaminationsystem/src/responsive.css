@@ -1,0 +1,52 @@
+/* Make layout flexible */
+.container {
+    width: 95%;
+    max-width: 1200px;
+    margin: auto;
+}
+
+/* Images responsive */
+img {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Tables responsive */
+.table-container {
+    overflow-x: auto;
+}
+
+/* Cards responsive */
+.card {
+    flex: 1 1 300px;
+}
+
+/* Mobile */
+@media (max-width:768px) {
+
+    .sidebar {
+        display: none;
+    }
+
+    .dashboard {
+        flex-direction: column;
+    }
+
+    .card {
+        width: 100%;
+    }
+
+}
+
+/* Small mobile */
+@media (max-width:480px) {
+
+    h1 {
+        font-size: 20px;
+    }
+
+    button {
+        width: 100%;
+    }
+
+}

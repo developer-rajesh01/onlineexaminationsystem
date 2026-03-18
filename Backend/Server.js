@@ -3,7 +3,7 @@ import "dotenv/config"; // loads .env
 import http from "http";
 import express from "express";
 import cors from "cors";
-import connectDB from "./config/DB.js";
+import connectDB from "./config/db.js";
 
 import authRoutes from "./routes/authRoutes.js";
 import examRoutes from "./routes/examRoutes.js";
@@ -32,7 +32,10 @@ app.use(express.urlencoded({ extended: true }));
 
 // CORS config - dynamic origin from env
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  origin: [
+    "http://localhost:3000",
+    "https://developer-rajesh01.github.io"
+  ],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   credentials: true,
@@ -42,19 +45,13 @@ app.use(cors(corsOptions));
 // Enhanced OPTIONS preflight handling
 app.use((req, res, next) => {
   if (req.method === "OPTIONS") {
-    res.setHeader("Access-Control-Allow-Origin", corsOptions.origin);
+    res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
     res.setHeader("Access-Control-Allow-Methods", corsOptions.methods.join(","));
     res.setHeader("Access-Control-Allow-Headers", corsOptions.allowedHeaders.join(","));
     if (corsOptions.credentials) res.setHeader("Access-Control-Allow-Credentials", "true");
     return res.sendStatus(200);
   }
   next();
-});
-
-// Connect DB
-connectDB().catch((err) => {
-  console.error("DB connect error:", err);
-  process.exit(1);
 });
 
 // Health check endpoint
@@ -133,20 +130,39 @@ app.set("io", io);
 
 const PORT = process.env.PORT || 5000;
 
-// Cron job scheduling
-console.log("⏰ Status updater cron scheduled every minute");
-cron.schedule("*/1 * * * *", async () => {
-  try {
-    await updateTestStatuses(io, { emitWindowMinutes: 5 });
-  } catch (err) {
-    console.error("Cron status updater error:", err);
-  }
-});
+// Start server only after DB connection
+const startServer = async () => {
 
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-});
+  try {
+
+    await connectDB();
+
+    server.listen(PORT, () => {
+
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
+
+      console.log("⏰ Status updater cron scheduled every minute");
+
+      cron.schedule("*/1 * * * *", async () => {
+        try {
+          await updateTestStatuses(io, { emitWindowMinutes: 5 });
+        } catch (err) {
+          console.error("Cron status updater error:", err.message);
+        }
+      });
+
+    });
+
+  } catch (error) {
+
+    console.error("Server startup failed:", error);
+
+  }
+
+};
+
+startServer();
 
 // Graceful shutdown
 const gracefulShutdown = (signal) => {

@@ -5,6 +5,7 @@ import {
     Trophy, TrendingDown, Users, CheckCircle, AlertTriangle,
     Search, X, Download, BarChart2
 } from 'lucide-react';
+import API_BASE_URL from "../../config/api";
 
 const TestReport = () => {
     const { testId } = useParams();
@@ -26,12 +27,12 @@ const TestReport = () => {
             setLoading(true);
             setError(null);
 
-            const testRes = await fetch(`http://localhost:5000/api/tests/${testId}`);
+            const testRes = await fetch(`${API_BASE_URL}/api/tests/${testId}`);
             if (!testRes.ok) throw new Error(`Test fetch failed (${testRes.status})`);
             const testData = await testRes.json();
             setTest(testData.test || testData);
 
-            const attemptsRes = await fetch(`http://localhost:5000/api/attempts/test/${testId}`);
+            const attemptsRes = await fetch(`${API_BASE_URL}/api/attempts/test/${testId}`);
             if (!attemptsRes.ok) throw new Error(`Attempts fetch failed (${attemptsRes.status})`);
             const attemptsData = await attemptsRes.json();
             setAttempts(attemptsData.attempts || []);
